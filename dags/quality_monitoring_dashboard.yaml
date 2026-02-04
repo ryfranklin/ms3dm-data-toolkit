@@ -1,0 +1,144 @@
+name: quality_monitoring_dashboard
+description: Track data quality metrics and trends across all tables
+tags:
+  - monitoring
+  - dashboard
+  - metrics
+
+schedule: "0 */6 * * *"  # Run every 6 hours
+
+env:
+  - API_URL: http://backend:8000
+  - CONNECTION_ID: local_adventureworks
+
+steps:
+  - name: discover_all_tables
+    description: Get list of all tables in database
+    command: |
+      curl -s -X POST ${API_URL}/api/expectations/available-tables \
+        -H "Content-Type: application/json" \
+        -d '{"connection_id": "'${CONNECTION_ID}'"}' | jq -c '.'
+    output: ALL_TABLES
+
+  - name: collect_table_statistics
+    description: Gather row counts and basic stats for all tables
+    depends:
+      - discover_all_tables
+    command: |
+      echo "Collecting statistics at $(date)"
+      
+      # Create stats file
+      STATS_FILE="/var/lib/dagu/data/table_stats_$(date +%Y%m%d_%H%M%S).json"
+      echo '{
+        "timestamp": "'$(date -Iseconds)'",
+        "connection": "'${CONNECTION_ID}'",
+        "tables": '${ALL_TABLES}'
+      }' | jq '.' > ${STATS_FILE}
+      
+      echo "Statistics saved to: ${STATS_FILE}"
+      cat ${STATS_FILE}
+    output: STATS_FILE_PATH
+
+  - name: check_critical_tables
+    description: Run quality checks on business-critical tables
+    depends:
+      - collect_table_statistics
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Critical Tables Monitoring",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_table_row_count_to_be_between",
+              "params": {"min_rows": 1},
+              "target": {"schema": "SalesLT", "table": "Customer"}
+            },
+            {
+              "type": "expect_table_row_count_to_be_between",
+              "params": {"min_rows": 1},
+              "target": {"schema": "SalesLT", "table": "Product"}
+            },
+            {
+              "type": "expect_table_row_count_to_be_between",
+              "params": {"min_rows": 1},
+              "target": {"schema": "SalesLT", "table": "SalesOrderHeader"}
+            }
+          ]
+        }'
+    output: CRITICAL_CHECKS
+
+  - name: analyze_quality_trends
+    description: Compare current metrics with historical data
+    depends:
+      - check_critical_tables
+    command: |
+      echo "=== Quality Trend Analysis ===" > /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      echo "Analysis Time: $(date)" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      echo "" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      
+      # Count stats files (history)
+      HISTORY_COUNT=$(ls -1 /var/lib/dagu/data/table_stats_*.json 2>/dev/null | wc -l)
+      echo "Historical Data Points: ${HISTORY_COUNT}" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      echo "" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      
+      # Current check results
+      echo "Current Quality Status:" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      echo "${CRITICAL_CHECKS}" | jq '.statistics' >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      echo "" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      
+      # Table counts
+      TABLE_COUNT=$(echo "${ALL_TABLES}" | jq '.total_tables')
+      echo "Total Tables Monitored: ${TABLE_COUNT}" >> /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+      
+      cat /var/lib/dagu/logs/quality_trends_$(date +%Y%m%d_%H%M).txt
+
+  - name: generate_dashboard_data
+    description: Prepare data for quality dashboard visualization
+    depends:
+      - analyze_quality_trends
+    command: |
+      DASHBOARD_FILE="/var/lib/dagu/data/dashboard_latest.json"
+      
+      echo '{
+        "last_updated": "'$(date -Iseconds)'",
+        "connection": "'${CONNECTION_ID}'",
+        "summary": {
+          "total_tables": '$(echo "${ALL_TABLES}" | jq '.total_tables')',
+          "checks_passed": '$(echo "${CRITICAL_CHECKS}" | jq '.statistics.passed')',
+          "checks_failed": '$(echo "${CRITICAL_CHECKS}" | jq '.statistics.failed')',
+          "checks_total": '$(echo "${CRITICAL_CHECKS}" | jq '.statistics.total_expectations')'
+        },
+        "critical_checks": '${CRITICAL_CHECKS}',
+        "all_tables": '${ALL_TABLES}'
+      }' | jq '.' > ${DASHBOARD_FILE}
+      
+      echo "📊 Dashboard data updated: ${DASHBOARD_FILE}"
+      cat ${DASHBOARD_FILE} | jq '.summary'
+
+  - name: alert_if_degraded
+    description: Check if quality has degraded and send alerts
+    depends:
+      - generate_dashboard_data
+    command: |
+      FAILED_COUNT=$(echo "${CRITICAL_CHECKS}" | jq '.statistics.failed')
+      
+      if [ "${FAILED_COUNT}" -gt 0 ]; then
+        echo "⚠️ WARNING: ${FAILED_COUNT} quality checks failed!"
+        echo "Review details at: http://localhost:8080"
+        exit 1
+      else
+        echo "✅ All quality checks passing"
+        exit 0
+      fi
+
+handlerOn:
+  failure:
+    command: |
+      echo "$(date): Quality degradation detected" >> /var/lib/dagu/logs/quality_alerts.log
+      echo "Failed checks: ${CRITICAL_CHECKS}" | jq '.results[] | select(.success == false)' >> /var/lib/dagu/logs/quality_alerts.log
+  
+  success:
+    command: |
+      echo "$(date): All systems healthy" >> /var/lib/dagu/logs/quality_health.log

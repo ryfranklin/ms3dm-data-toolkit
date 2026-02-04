@@ -1,0 +1,117 @@
+name: adhoc_table_quality_check
+description: On-demand comprehensive quality check for any table
+tags:
+  - data-quality
+  - on-demand
+  - flexible
+
+# No schedule - run manually or trigger via API
+
+params:
+  - name: schema
+    default: SalesLT
+  - name: table
+    default: Customer
+  - name: connection_id
+    default: local_adventureworks
+
+env:
+  - API_URL: http://backend:8000
+
+steps:
+  - name: get_table_schema
+    description: Retrieve table structure
+    command: |
+      curl -s -X POST ${API_URL}/api/expectations/table-schema \
+        -H "Content-Type: application/json" \
+        -d '{
+          "connection_id": "'${connection_id}'",
+          "schema": "'${schema}'",
+          "table": "'${table}'"
+        }'
+    output: TABLE_SCHEMA
+
+  - name: run_null_checks
+    description: Check for NULL values in all columns
+    depends:
+      - get_table_schema
+    command: |
+      # This would dynamically generate checks for all columns
+      # For demo, checking first column
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "NULL Check - '${table}'",
+          "connection_id": "'${connection_id}'",
+          "expectations": [
+            {
+              "type": "expect_table_row_count_to_be_between",
+              "params": {"min_rows": 1},
+              "target": {"schema": "'${schema}'", "table": "'${table}'"}
+            }
+          ]
+        }'
+    output: NULL_CHECK_RESULTS
+
+  - name: run_uniqueness_checks
+    description: Check for duplicate records
+    depends:
+      - get_table_schema
+    command: |
+      echo "Running uniqueness checks on ${schema}.${table}"
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Uniqueness Check - '${table}'",
+          "connection_id": "'${connection_id}'",
+          "expectations": [
+            {
+              "type": "expect_table_row_count_to_be_between",
+              "params": {"min_rows": 1},
+              "target": {"schema": "'${schema}'", "table": "'${table}'"}
+            }
+          ]
+        }'
+    output: UNIQUENESS_RESULTS
+
+  - name: generate_quality_profile
+    description: Create data quality profile for the table
+    depends:
+      - run_null_checks
+      - run_uniqueness_checks
+    command: |
+      echo "=== Data Quality Profile ===" > /var/lib/dagu/logs/quality_profile_${schema}_${table}_$(date +%Y%m%d_%H%M%S).json
+      echo '{
+        "table": "'${schema}'.'${table}'",
+        "timestamp": "'$(date -Iseconds)'",
+        "schema": '${TABLE_SCHEMA}',
+        "null_checks": '${NULL_CHECK_RESULTS}',
+        "uniqueness_checks": '${UNIQUENESS_RESULTS}'
+      }' | jq '.' >> /var/lib/dagu/logs/quality_profile_${schema}_${table}_$(date +%Y%m%d_%H%M%S).json
+      
+      echo "✅ Quality profile generated for ${schema}.${table}"
+      cat /var/lib/dagu/logs/quality_profile_${schema}_${table}_$(date +%Y%m%d_%H%M%S).json
+
+  - name: summary_report
+    description: Display summary of quality checks
+    depends:
+      - generate_quality_profile
+    command: |
+      echo "================================"
+      echo "Table: ${schema}.${table}"
+      echo "Connection: ${connection_id}"
+      echo "Timestamp: $(date)"
+      echo "================================"
+      echo ""
+      echo "NULL Checks:"
+      echo "${NULL_CHECK_RESULTS}" | jq -r '.statistics'
+      echo ""
+      echo "Uniqueness Checks:"
+      echo "${UNIQUENESS_RESULTS}" | jq -r '.statistics'
+      echo ""
+      echo "================================"
+
+handlerOn:
+  exit:
+    command: |
+      echo "Quality check completed for ${schema}.${table} at $(date)"

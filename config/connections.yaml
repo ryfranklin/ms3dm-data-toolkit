@@ -1,0 +1,23 @@
+connections:
+- id: local_adventureworks
+  name: Local AdventureWorks (Docker)
+  server: sqlserver
+  port: 1433
+  database: AdventureWorksLT2022
+  auth_type: sql_auth
+  username: sa
+  password: YourStrong@Passw0rd
+  description: Sample database for testing (containerized)
+  active: true
+  is_sample: true
+
+# Example: Windows Authentication Connection
+# - id: prod_windows
+#   name: Production Server (Windows Auth)
+#   server: PROD-SQL-01
+#   port: 1433
+#   database: ProductionDB
+#   auth_type: windows
+#   description: Production database using Windows Authentication
+#   active: true
+#   is_sample: false

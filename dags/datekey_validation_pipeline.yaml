@@ -1,0 +1,117 @@
+name: datekey_validation_pipeline
+description: Validate all integer date keys across the database
+tags:
+  - data-quality
+  - date-keys
+  - validation
+
+schedule: "0 6 * * *"  # Run at 6 AM daily
+
+env:
+  - API_URL: http://backend:8000
+  - CONNECTION_ID: local_adventureworks
+
+steps:
+  - name: validate_order_datekeys
+    description: Check OrderDateKey in SalesOrderHeader
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Order DateKey Validation",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_column_values_to_be_valid_datekey",
+              "column": "OrderDateKey",
+              "params": {
+                "min_date": 20200101,
+                "max_date": 20301231
+              },
+              "target": {"schema": "SalesLT", "table": "SalesOrderHeader"}
+            }
+          ]
+        }'
+    output: ORDER_DATEKEY_RESULTS
+
+  - name: validate_ship_datekeys
+    description: Check ShipDateKey in SalesOrderHeader
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Ship DateKey Validation",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_column_values_to_be_valid_datekey",
+              "column": "ShipDateKey",
+              "params": {
+                "min_date": 20200101,
+                "max_date": 20301231
+              },
+              "target": {"schema": "SalesLT", "table": "SalesOrderHeader"}
+            }
+          ]
+        }'
+    output: SHIP_DATEKEY_RESULTS
+
+  - name: validate_date_dimension
+    description: Validate DimDate table has continuous date keys
+    depends:
+      - validate_order_datekeys
+      - validate_ship_datekeys
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Date Dimension Validation",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_column_values_to_be_valid_datekey",
+              "column": "DateKey",
+              "params": {
+                "min_date": 20240101,
+                "max_date": 20261231
+              },
+              "target": {"schema": "SalesLT", "table": "DimDate"}
+            },
+            {
+              "type": "expect_column_values_to_be_unique",
+              "column": "DateKey",
+              "target": {"schema": "SalesLT", "table": "DimDate"}
+            }
+          ]
+        }'
+    output: DIMD_ATE_RESULTS
+
+  - name: report_datekey_issues
+    description: Generate report of any invalid date keys found
+    depends:
+      - validate_date_dimension
+    command: |
+      echo "=== Date Key Validation Report ===" > /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+      echo "Generated: $(date)" >> /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+      echo "" >> /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+      
+      # Parse results
+      ORDER_SUCCESS=$(echo "${ORDER_DATEKEY_RESULTS}" | jq -r '.statistics.passed')
+      SHIP_SUCCESS=$(echo "${SHIP_DATEKEY_RESULTS}" | jq -r '.statistics.passed')
+      DIM_SUCCESS=$(echo "${DIMDATE_RESULTS}" | jq -r '.statistics.passed')
+      
+      echo "Order DateKey: ${ORDER_SUCCESS} checks passed" >> /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+      echo "Ship DateKey: ${SHIP_SUCCESS} checks passed" >> /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+      echo "Date Dimension: ${DIM_SUCCESS} checks passed" >> /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+      
+      cat /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt
+
+handlerOn:
+  failure:
+    command: |
+      echo "🚨 Date Key Validation Failed!"
+      echo "Invalid date keys detected. Check report at: /var/lib/dagu/logs/datekey_report_$(date +%Y%m%d).txt"
+  
+  success:
+    command: |
+      echo "✅ All Date Keys Valid!"

@@ -1,0 +1,12 @@
+
+=== Storage After Cleanup ===
+Total Storage: 0.01 MB
+Total Files: 16
+Status: healthy
+
+Breakdown:
+  catalog_metadata: 0.0 MB (1 files)
+  expectations_results: 0.01 MB (14 files)
+  logs: 0.0 MB (1 files)
+
+✅ Cleanup workflow completed successfully

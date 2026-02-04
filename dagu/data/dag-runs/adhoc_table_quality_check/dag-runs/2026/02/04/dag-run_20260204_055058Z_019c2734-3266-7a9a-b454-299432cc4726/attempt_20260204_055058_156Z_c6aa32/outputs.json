@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "dagName": "adhoc_table_quality_check",
+    "dagRunId": "019c2734-3266-7a9a-b454-299432cc4726",
+    "attemptId": "c6aa32",
+    "status": "failed",
+    "completedAt": "2026-02-04T05:50:58Z",
+    "params": "[\"default=SalesLT\",\"name=schema\",\"default=Customer\",\"name=table\",\"default=local_adventureworks\",\"name=connection_id\"]"
+  },
+  "outputs": {
+    "tableSchema": ""
+  }
+}

@@ -1,0 +1,71 @@
+name: storage_cleanup
+description: Clean up old files to reduce storage space
+schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+
+env:
+  - RETENTION_DAYS: "30"  # Keep files from last 30 days
+
+steps:
+  - name: check_storage_before
+    description: Check current storage usage before cleanup
+    command: |
+      echo "=== Checking Storage Status ==="
+      curl -s http://backend:8000/api/storage/status | jq -r '
+        "Total Storage: \(.total_size_mb) MB",
+        "Total Files: \(.total_files)",
+        "Status: \(.status)",
+        "",
+        "Breakdown:",
+        (.directories | to_entries[] | "  \(.key): \(.value.size_mb) MB (\(.value.file_count) files)")
+      ' || echo "Could not fetch storage status"
+
+  - name: execute_cleanup
+    description: Execute cleanup operations via backend API
+    command: |
+      echo "=== Executing Cleanup ==="
+      echo "Retention period: ${RETENTION_DAYS} days"
+      echo ""
+      
+      # Call backend cleanup endpoint
+      RESPONSE=$(curl -s -X POST http://backend:8000/api/storage/execute-cleanup \
+        -H "Content-Type: application/json" \
+        -d "{\"retention_days\": ${RETENTION_DAYS}}")
+      
+      # Check if successful
+      if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
+        echo "✅ Cleanup completed successfully!"
+        echo ""
+        echo "=== Results ==="
+        echo "$RESPONSE" | jq -r '
+          "Storage Before: \(.results.summary.storage_before_mb) MB",
+          "Storage After: \(.results.summary.storage_after_mb) MB",
+          "Space Recovered: \(.results.summary.space_recovered_mb) MB",
+          "",
+          "Actions:",
+          (.results.actions[] | "  • \(.)")
+        '
+      else
+        echo "❌ Cleanup failed:"
+        echo "$RESPONSE" | jq -r '.error // .message'
+        exit 1
+      fi
+    depends:
+      - check_storage_before
+
+  - name: verify_cleanup
+    description: Verify storage after cleanup
+    command: |
+      echo ""
+      echo "=== Storage After Cleanup ==="
+      curl -s http://backend:8000/api/storage/status | jq -r '
+        "Total Storage: \(.total_size_mb) MB",
+        "Total Files: \(.total_files)",
+        "Status: \(.status)",
+        "",
+        "Breakdown:",
+        (.directories | to_entries[] | "  \(.key): \(.value.size_mb) MB (\(.value.file_count) files)")
+      ' || echo "Could not fetch storage status"
+      echo ""
+      echo "✅ Cleanup workflow completed successfully"
+    depends:
+      - execute_cleanup

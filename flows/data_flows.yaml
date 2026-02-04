@@ -1,0 +1,8 @@
+flows:
+- id: adf38f26-d42d-4712-a413-a102106bf48b
+  name: Customer Reporting Pipeline
+  description: ''
+  owner: ''
+  source_tables: []
+  transformations: []
+  destination: {}

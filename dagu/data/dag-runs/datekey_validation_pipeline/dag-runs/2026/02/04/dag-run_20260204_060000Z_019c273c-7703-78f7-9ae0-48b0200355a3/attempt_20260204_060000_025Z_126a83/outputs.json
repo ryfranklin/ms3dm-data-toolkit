@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "dagName": "datekey_validation_pipeline",
+    "dagRunId": "019c273c-7703-78f7-9ae0-48b0200355a3",
+    "attemptId": "126a83",
+    "status": "failed",
+    "completedAt": "2026-02-04T06:00:00Z"
+  },
+  "outputs": {
+    "orderDatekeyResults": ""
+  }
+}

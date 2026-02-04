@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "dagName": "quality_monitoring_dashboard",
+    "dagRunId": "019c273c-7703-7841-b898-4861c32c57c7",
+    "attemptId": "e2db1c",
+    "status": "failed",
+    "completedAt": "2026-02-04T06:00:00Z"
+  },
+  "outputs": {
+    "allTables": "",
+    "statsFilePath": "Collecting statistics at Wed Feb  4 06:00:00 UTC 2026"
+  }
+}

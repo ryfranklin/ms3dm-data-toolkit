@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ms3dm-toolkit-backend"
+version = "1.0.0"
+description = "MS3DM Toolkit Backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "Flask==3.0.0",
+    "Flask-CORS==4.0.0",
+    "pyodbc==5.0.1",
+    "PyYAML==6.0.1",
+    "python-dotenv==1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+    "pyright>=1.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "services*", "utils*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+# Enable specific rule sets
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+# Exclude directories
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "*.egg-info",
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+[tool.ruff.isort]
+known-first-party = ["api", "services", "utils"]
+
+[tool.pyright]
+include = ["api", "services", "utils", "app.py"]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "venv",
+]
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+pythonVersion = "3.11"
+pythonPlatform = "Linux"

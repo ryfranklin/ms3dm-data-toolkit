@@ -1,0 +1,136 @@
+name: daily_data_quality_checks
+description: Run comprehensive data quality checks on all critical tables
+tags:
+  - data-quality
+  - daily
+  - automated
+
+schedule: "0 2 * * *"  # Run at 2 AM daily
+
+env:
+  - API_URL: http://backend:8000
+  - CONNECTION_ID: local_adventureworks
+
+params:
+  - name: schema
+    default: SalesLT
+  - name: send_alerts
+    default: "true"
+
+steps:
+  - name: check_customer_data
+    description: Validate Customer table data quality
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Customer Data Quality",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_column_values_to_not_be_null",
+              "column": "CustomerID",
+              "target": {"schema": "'${schema}'", "table": "Customer"}
+            },
+            {
+              "type": "expect_column_values_to_be_unique",
+              "column": "CustomerID",
+              "target": {"schema": "'${schema}'", "table": "Customer"}
+            },
+            {
+              "type": "expect_column_values_to_match_regex",
+              "column": "EmailAddress",
+              "params": {"pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"},
+              "target": {"schema": "'${schema}'", "table": "Customer"}
+            }
+          ]
+        }'
+    output: CUSTOMER_RESULTS
+
+  - name: check_product_data
+    description: Validate Product table data quality
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Product Data Quality",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_column_values_to_not_be_null",
+              "column": "ProductID",
+              "target": {"schema": "'${schema}'", "table": "Product"}
+            },
+            {
+              "type": "expect_column_values_to_not_be_null",
+              "column": "Name",
+              "target": {"schema": "'${schema}'", "table": "Product"}
+            },
+            {
+              "type": "expect_column_values_to_be_between",
+              "column": "ListPrice",
+              "params": {"min_value": 0},
+              "target": {"schema": "'${schema}'", "table": "Product"}
+            }
+          ]
+        }'
+    output: PRODUCT_RESULTS
+
+  - name: check_order_data
+    description: Validate SalesOrderHeader table data quality
+    command: |
+      curl -X POST ${API_URL}/api/expectations/run-adhoc \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Order Data Quality",
+          "connection_id": "'${CONNECTION_ID}'",
+          "expectations": [
+            {
+              "type": "expect_table_row_count_to_be_between",
+              "params": {"min_rows": 1},
+              "target": {"schema": "'${schema}'", "table": "SalesOrderHeader"}
+            },
+            {
+              "type": "expect_column_values_to_not_be_null",
+              "column": "OrderDate",
+              "target": {"schema": "'${schema}'", "table": "SalesOrderHeader"}
+            },
+            {
+              "type": "expect_column_values_to_be_recent",
+              "column": "OrderDate",
+              "params": {"max_age_hours": 720},
+              "target": {"schema": "'${schema}'", "table": "SalesOrderHeader"}
+            }
+          ]
+        }'
+    output: ORDER_RESULTS
+
+  - name: generate_quality_report
+    description: Generate summary report of all quality checks
+    depends:
+      - check_customer_data
+      - check_product_data
+      - check_order_data
+    command: |
+      echo "=== Data Quality Report ===" > /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "Timestamp: $(date)" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "Customer Checks:" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "${CUSTOMER_RESULTS}" | jq '.statistics' >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "Product Checks:" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "${PRODUCT_RESULTS}" | jq '.statistics' >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "Order Checks:" >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      echo "${ORDER_RESULTS}" | jq '.statistics' >> /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+      cat /var/lib/dagu/logs/quality_report_$(date +%Y%m%d).txt
+
+handlerOn:
+  failure:
+    command: |
+      echo "❌ Data Quality Check Failed at $(date)"
+      echo "Check Dagu logs for details: http://localhost:8080"
+  
+  success:
+    command: |
+      echo "✅ All Data Quality Checks Passed at $(date)"

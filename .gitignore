@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+.pyright/
+pyrightconfig.json
+uv.lock
+
+# Node
+node_modules/
+dist/
+.npm
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data and results
+results/*.json
+!results/.gitkeep
+
+# Database backups and data
+database/init/*.bak
+database/init/*.mdf
+database/init/*.ldf
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+.dockerignore
+
+# Dagu workflow data
+dagu/data/*.json
+dagu/data/*.txt
+dagu/logs/*.txt
+dagu/logs/*.json
+dagu/logs/*.log
+!dagu/data/.gitkeep
+!dagu/logs/.gitkeep
+
+# Expectation results
+backend/expectations_results/*.json
+!backend/expectations_results/.gitkeep
+
+# Catalog metadata
+backend/catalog_metadata/*.json
+!backend/catalog_metadata/.gitkeep
+
+# Logs
+backend/logs/*.log
+!backend/logs/.gitkeep
+
+# Cleanup tracking
+backend/last_cleanup.json

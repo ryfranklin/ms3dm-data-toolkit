@@ -1,0 +1,44 @@
+name: cutomer_check_pipeline
+description: Data quality pipeline
+# No schedule - manual trigger only
+tags:
+  - data-quality
+  - automated
+
+env:
+  - CONNECTION_ID: local_adventureworks
+  - SUITE_NAME: custom_suite
+
+steps:
+  - name: run_quality_checks
+    command: |
+      curl -X POST http://backend:8000/api/expectations/run-suite \
+        -H "Content-Type: application/json" \
+        -d '{
+          "suite_name": "${SUITE_NAME}",
+          "connection_id": "${CONNECTION_ID}"
+        }' \
+        -o /tmp/results.json
+    
+  - name: check_results
+    command: |
+      # Check if any tests failed
+      failures=$(jq '.statistics.failed' /tmp/results.json)
+      if [ "$failures" -gt 0 ]; then
+        echo "❌ $failures check(s) failed"
+        exit 1
+      else
+        echo "✅ All checks passed"
+      fi
+    depends:
+      - run_quality_checks
+
+handlerOn:
+  failure:
+    command: |
+      echo "Pipeline failed at $(date)"
+      # Add notification logic here (email, Slack, etc.)
+  
+  success:
+    command: |
+      echo "Pipeline completed successfully at $(date)"
