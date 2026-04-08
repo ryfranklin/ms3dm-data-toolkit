@@ -6,10 +6,11 @@ The MS3DM Toolkit now includes an automatic storage management system that monit
 ## Components
 
 ### 1. Backend Storage API (`backend/api/storage.py`)
-Monitors storage usage across three key directories:
+Monitors storage usage across four key directories:
 - `expectations_results/` - Quality check results
 - `catalog_metadata/` - Table documentation
 - `logs/` - Application logs
+- `dagu/logs/` - Dagu workflow execution logs
 
 **Endpoints**:
 - `GET /api/storage/status` - Current storage usage

@@ -1,11 +1,8 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import ConfigManager from './components/ConfigManager/ConfigManager';
-import QualityDashboard from './components/QualityDashboard/QualityDashboard';
-import QualityBuilder from './components/QualityBuilder/QualityBuilder';
-import FlowVisualizer from './components/FlowVisualizer/FlowVisualizer';
-import SQLParser from './components/FlowVisualizer/SQLParser';
-import PipelineScheduler from './components/Scheduler/PipelineScheduler';
+import ETLWorkspace from './components/ETL/ETLWorkspace';
+import Documentation from './components/Documentation/Documentation';
 import DataCatalog from './components/DataCatalog/DataCatalog';
 import StorageWarning from './components/StorageWarning/StorageWarning';
 
@@ -29,16 +26,10 @@ function App() {
                     Configuration
                   </Link>
                   <Link
-                    to="/quality"
+                    to="/etl"
                     className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                   >
-                    Data Quality
-                  </Link>
-                  <Link
-                    to="/quality-builder"
-                    className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                  >
-                    Quality Builder
+                    ETL
                   </Link>
                   <Link
                     to="/catalog"
@@ -47,22 +38,10 @@ function App() {
                     Data Catalog
                   </Link>
                   <Link
-                    to="/scheduler"
+                    to="/docs"
                     className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
                   >
-                    Scheduler
-                  </Link>
-                  <Link
-                    to="/flows"
-                    className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                  >
-                    Data Flows
-                  </Link>
-                  <Link
-                    to="/sql-parser"
-                    className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                  >
-                    SQL Parser
+                    Documentation
                   </Link>
                 </div>
               </div>
@@ -79,12 +58,9 @@ function App() {
           
           <Routes>
             <Route path="/" element={<div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8"><ConfigManager /></div>} />
-            <Route path="/quality" element={<div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8"><QualityDashboard /></div>} />
-            <Route path="/quality-builder" element={<QualityBuilder />} />
+            <Route path="/etl" element={<ETLWorkspace />} />
             <Route path="/catalog" element={<DataCatalog />} />
-            <Route path="/scheduler" element={<PipelineScheduler />} />
-            <Route path="/flows" element={<FlowVisualizer />} />
-            <Route path="/sql-parser" element={<SQLParser />} />
+            <Route path="/docs" element={<Documentation />} />
           </Routes>
         </main>
       </div>

@@ -1382,7 +1382,7 @@ function QualityDashboard() {
   };
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 py-8 bg-gray-50 min-h-screen">
+    <div className="px-4 sm:px-6 lg:px-8 py-8 bg-gray-50 min-h-full">
       <div className="sm:flex sm:items-center mb-6">
         <div className="sm:flex-auto">
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">

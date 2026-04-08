@@ -1,0 +1,71 @@
+name: dbt_source_freshness
+description: Check dbt source freshness and regenerate stale catalogs
+tags:
+  - dbt
+  - freshness
+  - monitoring
+
+schedule: "0 */6 * * *"  # Run every 6 hours
+
+env:
+  - API_URL: http://backend:8000
+  - MAX_AGE_HOURS: "24"
+
+steps:
+  - name: fetch_connections
+    description: Get all active connections from the config API
+    command: |
+      curl -s ${API_URL}/api/config/ | jq -r '.connections[] | select(.active == true) | .id'
+    output: CONNECTION_IDS
+
+  - name: check_and_refresh
+    description: Check catalog age and regenerate if stale (older than MAX_AGE_HOURS)
+    depends:
+      - fetch_connections
+    command: |
+      echo "Checking catalog freshness (max age: ${MAX_AGE_HOURS}h)..."
+      REFRESHED=0
+      FRESH=0
+      NO_ARTIFACTS=0
+      NOW=$(date +%s)
+
+      for CONN_ID in ${CONNECTION_IDS}; do
+        STATUS=$(curl -s ${API_URL}/api/dbt/${CONN_ID}/status)
+        HAS_ARTIFACTS=$(echo "${STATUS}" | jq -r '.has_artifacts')
+
+        if [ "${HAS_ARTIFACTS}" != "true" ]; then
+          echo "  ${CONN_ID}: No artifacts found, generating..."
+          curl -s -X POST ${API_URL}/api/dbt/${CONN_ID}/generate-docs > /dev/null
+          NO_ARTIFACTS=$((NO_ARTIFACTS + 1))
+          continue
+        fi
+
+        MODIFIED=$(echo "${STATUS}" | jq -r '.catalog.modified // empty')
+        if [ -n "${MODIFIED}" ]; then
+          MOD_EPOCH=$(date -d "${MODIFIED}" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "${MODIFIED}" +%s 2>/dev/null || echo "0")
+          AGE_HOURS=$(( (NOW - MOD_EPOCH) / 3600 ))
+          if [ "${AGE_HOURS}" -ge "${MAX_AGE_HOURS}" ]; then
+            echo "  ${CONN_ID}: Stale (${AGE_HOURS}h old), regenerating..."
+            curl -s -X POST ${API_URL}/api/dbt/${CONN_ID}/generate-docs > /dev/null
+            REFRESHED=$((REFRESHED + 1))
+          else
+            echo "  ${CONN_ID}: Fresh (${AGE_HOURS}h old)"
+            FRESH=$((FRESH + 1))
+          fi
+        fi
+      done
+
+      echo ""
+      echo "=== Summary ==="
+      echo "Fresh: ${FRESH}"
+      echo "Refreshed: ${REFRESHED}"
+      echo "New: ${NO_ARTIFACTS}"
+
+handlerOn:
+  failure:
+    command: |
+      echo "dbt source freshness check failed at $(date)"
+
+  success:
+    command: |
+      echo "dbt source freshness check completed at $(date)"

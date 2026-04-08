@@ -51,19 +51,14 @@ export const qualityApi = {
   loadConfig: (connectionId) => apiClient.get(`/api/quality/load-config/${connectionId}`),
 };
 
-// Flows API
-export const flowsApi = {
-  getFlows: () => apiClient.get('/api/flows/'),
-  getFlow: (id) => apiClient.get(`/api/flows/${id}`),
-  createFlow: (data) => apiClient.post('/api/flows/', data),
-  updateFlow: (id, data) => apiClient.put(`/api/flows/${id}`, data),
-  deleteFlow: (id) => apiClient.delete(`/api/flows/${id}`),
-  getLineage: (id) => apiClient.get(`/api/flows/${id}/lineage`),
-  discoverRelationships: (connectionId) => apiClient.post('/api/flows/discover', { connection_id: connectionId }),
-  getSchema: (connectionId) => apiClient.get(`/api/flows/schema/${connectionId}`),
-  getObjectMetadata: (connectionId, schema, object) => 
-    apiClient.get(`/api/flows/schema/${connectionId}/metadata/${schema}/${object}`),
-  parseSql: (sqlCode) => apiClient.post('/api/flows/parse-sql', { sql_code: sqlCode }),
+// Documentation API
+export const docsApi = {
+  getDocuments: () => apiClient.get('/api/docs/'),
+  getDocument: (id) => apiClient.get(`/api/docs/${id}`),
+  createDocument: (data) => apiClient.post('/api/docs/', data),
+  updateDocument: (id, data) => apiClient.put(`/api/docs/${id}`, data),
+  deleteDocument: (id) => apiClient.delete(`/api/docs/${id}`),
+  getCategories: () => apiClient.get('/api/docs/categories'),
 };
 
 // Expectations API (Quality Builder)
@@ -210,6 +205,19 @@ export const storageApi = {
   getCleanupInfo: () => apiClient.get('/api/storage/cleanup-info'),
   getRecommendations: () => apiClient.get('/api/storage/recommendations'),
   triggerCleanup: () => apiClient.post('/api/storage/trigger-cleanup'),
+};
+
+// dbt API
+export const dbtApi = {
+  generateSources: (connectionId) => apiClient.post(`/api/dbt/${connectionId}/generate-sources`),
+  generateDocs: (connectionId) => apiClient.post(`/api/dbt/${connectionId}/generate-docs`),
+  sourceFreshness: (connectionId) => apiClient.post(`/api/dbt/${connectionId}/source-freshness`),
+  getCatalog: (connectionId) => apiClient.get(`/api/dbt/${connectionId}/catalog`),
+  getManifest: (connectionId) => apiClient.get(`/api/dbt/${connectionId}/manifest`),
+  getSources: (connectionId) => apiClient.get(`/api/dbt/${connectionId}/sources`),
+  getLineage: (connectionId) => apiClient.get(`/api/dbt/${connectionId}/lineage`),
+  getStatus: (connectionId) => apiClient.get(`/api/dbt/${connectionId}/status`),
+  cleanup: (connectionId) => apiClient.delete(`/api/dbt/${connectionId}/artifacts`),
 };
 
 // Health check

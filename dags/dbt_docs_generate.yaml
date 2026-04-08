@@ -1,0 +1,67 @@
+name: dbt_docs_generate
+description: Generate dbt documentation for all active connections
+tags:
+  - dbt
+  - documentation
+  - daily
+
+schedule: "0 1 * * *"  # Run at 1 AM daily
+
+env:
+  - API_URL: http://backend:8000
+
+steps:
+  - name: fetch_connections
+    description: Get all active connections from the config API
+    command: |
+      curl -s ${API_URL}/api/config/ | jq -r '.connections[] | select(.active == true) | .id'
+    output: CONNECTION_IDS
+
+  - name: generate_docs
+    description: Generate dbt docs for each active connection
+    depends:
+      - fetch_connections
+    command: |
+      echo "Starting dbt docs generation..."
+      SUCCESS=0
+      FAIL=0
+      for CONN_ID in ${CONNECTION_IDS}; do
+        echo "Generating docs for connection: ${CONN_ID}"
+        RESULT=$(curl -s -o /dev/null -w "%{http_code}" -X POST ${API_URL}/api/dbt/${CONN_ID}/generate-docs)
+        if [ "$RESULT" = "200" ]; then
+          echo "  Success: ${CONN_ID}"
+          SUCCESS=$((SUCCESS + 1))
+        else
+          echo "  Failed: ${CONN_ID} (HTTP ${RESULT})"
+          FAIL=$((FAIL + 1))
+        fi
+      done
+      echo ""
+      echo "=== Summary ==="
+      echo "Successful: ${SUCCESS}"
+      echo "Failed: ${FAIL}"
+      if [ "$FAIL" -gt 0 ]; then
+        exit 1
+      fi
+
+  - name: verify_artifacts
+    description: Verify dbt artifacts were generated for each connection
+    depends:
+      - generate_docs
+    command: |
+      echo "Verifying dbt artifacts..."
+      for CONN_ID in ${CONNECTION_IDS}; do
+        STATUS=$(curl -s ${API_URL}/api/dbt/${CONN_ID}/status)
+        HAS_ARTIFACTS=$(echo "${STATUS}" | jq -r '.has_artifacts')
+        echo "Connection ${CONN_ID}: has_artifacts=${HAS_ARTIFACTS}"
+      done
+
+handlerOn:
+  failure:
+    command: |
+      echo "dbt docs generation failed at $(date)"
+      echo "Check Dagu logs for details: http://localhost:8080"
+
+  success:
+    command: |
+      echo "dbt docs generation completed successfully at $(date)"

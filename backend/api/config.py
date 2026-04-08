@@ -2,18 +2,21 @@
 Configuration API endpoints
 Manage SQL Server connections
 """
-from flask import Blueprint, request, jsonify
-from utils.config_manager import ConfigManager
+from flask import Blueprint, request, jsonify, current_app
 from services.db_connector import DBConnector
 
 config_bp = Blueprint('config', __name__)
-config_manager = ConfigManager()
+
+
+def _store():
+    return current_app.config['METADATA_STORE']
+
 
 @config_bp.route('/', methods=['GET'])
 def get_connections():
     """Get all configured connections"""
     try:
-        connections = config_manager.get_all_connections()
+        connections = _store().get_all_connections()
         return jsonify({'connections': connections}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -22,7 +25,7 @@ def get_connections():
 def get_connection(connection_id):
     """Get a specific connection by ID"""
     try:
-        connection = config_manager.get_connection(connection_id)
+        connection = _store().get_connection(connection_id)
         if connection:
             return jsonify(connection), 200
         return jsonify({'error': 'Connection not found'}), 404
@@ -34,7 +37,7 @@ def create_connection():
     """Create a new connection"""
     try:
         data = request.json
-        connection_id = config_manager.add_connection(data)
+        connection_id = _store().add_connection(data)
         return jsonify({
             'message': 'Connection created successfully',
             'connection_id': connection_id
@@ -49,7 +52,7 @@ def update_connection(connection_id):
     """Update an existing connection"""
     try:
         data = request.json
-        config_manager.update_connection(connection_id, data)
+        _store().update_connection(connection_id, data)
         return jsonify({'message': 'Connection updated successfully'}), 200
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -60,7 +63,7 @@ def update_connection(connection_id):
 def delete_connection(connection_id):
     """Delete a connection"""
     try:
-        config_manager.delete_connection(connection_id)
+        _store().delete_connection(connection_id)
         return jsonify({'message': 'Connection deleted successfully'}), 200
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
@@ -71,13 +74,13 @@ def delete_connection(connection_id):
 def test_connection(connection_id):
     """Test a database connection"""
     try:
-        connection = config_manager.get_connection(connection_id)
+        connection = _store().get_connection(connection_id)
         if not connection:
             return jsonify({'error': 'Connection not found'}), 404
-        
+
         db_connector = DBConnector(connection)
         success, message = db_connector.test_connection()
-        
+
         if success:
             return jsonify({
                 'success': True,

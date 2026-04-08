@@ -27,10 +27,6 @@ dist/
 *.swp
 *.swo
 
-# Data and results
-results/*.json
-!results/.gitkeep
-
 # Database backups and data
 database/init/*.bak
 database/init/*.mdf
@@ -47,26 +43,14 @@ Thumbs.db
 # Docker volumes
 .dockerignore
 
-# Dagu workflow data
-dagu/data/*.json
-dagu/data/*.txt
-dagu/logs/*.txt
-dagu/logs/*.json
-dagu/logs/*.log
-!dagu/data/.gitkeep
-!dagu/logs/.gitkeep
+# Dagu workflow data (still file-based)
+dagu/data/
+dagu/logs/
 
-# Expectation results
-backend/expectations_results/*.json
-!backend/expectations_results/.gitkeep
-
-# Catalog metadata
-backend/catalog_metadata/*.json
-!backend/catalog_metadata/.gitkeep
+# dbt generated artifacts (per-connection runtime dirs)
+backend/dbt_project/targets/
+!backend/dbt_project/targets/.gitkeep
 
 # Logs
 backend/logs/*.log
 !backend/logs/.gitkeep
-
-# Cleanup tracking
-backend/last_cleanup.json

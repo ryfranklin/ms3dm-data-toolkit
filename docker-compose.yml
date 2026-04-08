@@ -6,17 +6,14 @@ services:
     container_name: ms3dm_sqlserver
     environment:
       - ACCEPT_EULA=Y
-      - SA_PASSWORD=YourStrong@Passw0rd
+      - SA_PASSWORD=${SA_PASSWORD:-YourStrong@Passw0rd}
       - MSSQL_PID=Developer
     ports:
       - "1433:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
-      # Note: SQL Server doesn't auto-run scripts from /docker-entrypoint-initdb.d
-      # Run database/init/01-adventureworks.sh manually after container starts
-      # - ./database/init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -C -Q "SELECT 1" || exit 1
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${SA_PASSWORD:-YourStrong@Passw0rd}" -C -Q "SELECT 1" || exit 1
       interval: 10s
       timeout: 3s
       retries: 10
@@ -28,10 +25,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - ./config:/app/config
-      - ./flows:/app/flows
-      - ./results:/app/results
-      - ./dags:/app/dags
+      - dags_volume:/app/dags
     environment:
       - FLASK_ENV=development
       - FLASK_DEBUG=1
@@ -39,7 +33,12 @@ services:
       - SQL_SERVER_HOST=sqlserver
       - SQL_SERVER_PORT=1433
       - SQL_SERVER_USER=sa
-      - SQL_SERVER_PASSWORD=YourStrong@Passw0rd
+      - SQL_SERVER_PASSWORD=${SA_PASSWORD:-YourStrong@Passw0rd}
+      - MS3DM_METADATA_HOST=sqlserver
+      - MS3DM_METADATA_PORT=1433
+      - MS3DM_METADATA_USER=sa
+      - MS3DM_METADATA_PASSWORD=${SA_PASSWORD:-YourStrong@Passw0rd}
+      - MS3DM_METADATA_DATABASE=ms3dm_metadata
     command: python app.py
     depends_on:
       sqlserver:
@@ -59,16 +58,15 @@ services:
       - backend
 
   dagu:
-    image: ghcr.io/dagu-org/dagu:latest
+    image: ghcr.io/dagucloud/dagu:latest
     container_name: ms3dm_dagu
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./dags:/var/lib/dagu/dags
+      - dags_volume:/var/lib/dagu/dags
       - ./dagu/data:/var/lib/dagu/data
       - ./dagu/logs:/var/lib/dagu/logs
-      - ./config:/config:ro
       - ./dagu-entrypoint.sh:/entrypoint.sh:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -83,3 +81,4 @@ services:
 
 volumes:
   sqlserver_data:
+  dags_volume:

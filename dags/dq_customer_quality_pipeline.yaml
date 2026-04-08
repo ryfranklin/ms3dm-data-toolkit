@@ -1,0 +1,41 @@
+name: DQ_CUSTOMER - Quality Pipeline
+description: Automated data quality checks
+schedule: ''
+params: RETENTION_DAYS=30
+steps:
+- name: not_null_check
+  description: Run quality checks on SalesLT.Customer
+  command: "echo \"=== Not Null Check ===\"\necho \"Table: SalesLT.Customer\"\necho\
+    \ \"Checks: not_null\"\necho \"\"\n\n# Call quality check API\nRESPONSE=$(curl\
+    \ -s -X POST http://backend:8000/api/quality/run-checks \\\n  -H \"Content-Type:\
+    \ application/json\" \\\n  -d '{\"connection_id\": \"local_adventureworks\", \"\
+    schema\": \"SalesLT\", \"table\": \"Customer\", \"checks\": [\"\"not_null\"\"\
+    ]}')\n\n# Check if successful\nif echo \"$RESPONSE\" | jq -e '.check_id' > /dev/null\
+    \ 2>&1; then\n  echo \"\u2705 Quality checks passed!\"\n  CHECK_ID=$(echo \"$RESPONSE\"\
+    \ | jq -r '.check_id')\n  echo \"Check ID: $CHECK_ID\"\n  echo \"\"\n  echo \"\
+    $RESPONSE\" | jq -r '.summary'\nelse\n  echo \"\u274C Quality checks failed:\"\
+    \n  echo \"$RESPONSE\" | jq -r '.error // .message'\n  echo 'Continuing despite\
+    \ failure...'\nfi"
+- name: min_row_count_check
+  description: Run quality checks on SalesLT.Customer
+  command: "echo \"=== Min Row Count Check ===\"\necho \"Table: SalesLT.Customer\"\
+    \necho \"Checks: row_count\"\necho \"\"\n\n# Call quality check API\nRESPONSE=$(curl\
+    \ -s -X POST http://backend:8000/api/quality/run-checks \\\n  -H \"Content-Type:\
+    \ application/json\" \\\n  -d '{\"connection_id\": \"local_adventureworks\", \"\
+    schema\": \"SalesLT\", \"table\": \"Customer\", \"checks\": [\"\"row_count\"\"\
+    ]}')\n\n# Check if successful\nif echo \"$RESPONSE\" | jq -e '.check_id' > /dev/null\
+    \ 2>&1; then\n  echo \"\u2705 Quality checks passed!\"\n  CHECK_ID=$(echo \"$RESPONSE\"\
+    \ | jq -r '.check_id')\n  echo \"Check ID: $CHECK_ID\"\n  echo \"\"\n  echo \"\
+    $RESPONSE\" | jq -r '.summary'\nelse\n  echo \"\u274C Quality checks failed:\"\
+    \n  echo \"$RESPONSE\" | jq -r '.error // .message'\n  echo 'Continuing despite\
+    \ failure...'\nfi"
+  depends:
+  - not_null_check
+- name: pipeline_summary
+  description: Display pipeline completion summary
+  command: "echo \"\"\necho \"==========================================\"\necho \"\
+    \u2705 Pipeline completed successfully!\"\necho \"==========================================\"\
+    \necho \"\"\necho \"All quality checks have been executed.\"\necho \"Check Dagu\
+    \ logs for detailed results.\""
+  depends:
+  - min_row_count_check

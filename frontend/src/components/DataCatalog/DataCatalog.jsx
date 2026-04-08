@@ -4,6 +4,7 @@ import SchemaExplorer from './SchemaExplorer';
 import TableDetails from './TableDetails';
 import CatalogSearch from './CatalogSearch';
 import DataDictionary from './DataDictionary';
+import DbtLineage from './DbtLineage';
 
 function DataCatalog() {
   const [activeTab, setActiveTab] = useState('explorer');
@@ -38,6 +39,7 @@ function DataCatalog() {
     { id: 'dictionary', label: 'Data Dictionary', icon: '📚' },
     { id: 'search', label: 'Search', icon: '🔍' },
     { id: 'details', label: 'Table Details', icon: '📊', disabled: !selectedTable },
+    { id: 'dbt', label: 'dbt Lineage', icon: '🔗' },
   ];
 
   return (
@@ -117,6 +119,9 @@ function DataCatalog() {
             onBack={() => setActiveTab('explorer')}
             onTableSelect={handleTableSelect}
           />
+        )}
+        {activeTab === 'dbt' && (
+          <DbtLineage connectionId={selectedConnection} />
         )}
       </div>
     </div>

@@ -10,35 +10,44 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+from services.metadata_store import MetadataStore
+
 # Import blueprints
 from api.config import config_bp
 from api.quality import quality_bp
-from api.flows import flows_bp
+from api.docs import docs_bp
 from api.expectations import expectations_bp
 from api.scheduler import scheduler_bp
 from api.catalog import catalog_bp
 from api.storage import storage_bp
+from api.dbt import dbt_bp
 
 def create_app():
     """Create and configure the Flask application"""
     app = Flask(__name__)
-    
+
     # Enable CORS for frontend
     CORS(app, resources={r"/api/*": {"origins": "*"}})
-    
+
     # Configuration
     app.config['DEBUG'] = os.getenv('FLASK_DEBUG', 'False') == '1'
     app.config['ENV'] = os.getenv('FLASK_ENV', 'production')
-    
+
+    # Initialize metadata store (SQL Server-backed persistence)
+    metadata_store = MetadataStore()
+    metadata_store.initialize()
+    app.config['METADATA_STORE'] = metadata_store
+
     # Register blueprints
     app.register_blueprint(config_bp, url_prefix='/api/config')
     app.register_blueprint(quality_bp, url_prefix='/api/quality')
-    app.register_blueprint(flows_bp, url_prefix='/api/flows')
+    app.register_blueprint(docs_bp, url_prefix='/api/docs')
     app.register_blueprint(expectations_bp, url_prefix='/api/expectations')
     app.register_blueprint(scheduler_bp, url_prefix='/api/scheduler')
     app.register_blueprint(catalog_bp, url_prefix='/api/catalog')
     app.register_blueprint(storage_bp, url_prefix='/api/storage')
-    
+    app.register_blueprint(dbt_bp, url_prefix='/api/dbt')
+
     # Health check endpoint
     @app.route('/health', methods=['GET'])
     def health_check():
@@ -47,7 +56,7 @@ def create_app():
             'service': 'ms3dm-toolkit',
             'version': '1.0.0'
         }), 200
-    
+
     # Root endpoint
     @app.route('/', methods=['GET'])
     def root():
@@ -58,23 +67,24 @@ def create_app():
                 'health': '/health',
                 'config': '/api/config',
                 'quality': '/api/quality',
-                'flows': '/api/flows',
+                'docs': '/api/docs',
                 'expectations': '/api/expectations',
                 'scheduler': '/api/scheduler',
                 'catalog': '/api/catalog',
-                'storage': '/api/storage'
+                'storage': '/api/storage',
+                'dbt': '/api/dbt'
             }
         }), 200
-    
+
     # Error handlers
     @app.errorhandler(404)
     def not_found(error):
         return jsonify({'error': 'Not found'}), 404
-    
+
     @app.errorhandler(500)
     def internal_error(error):
         return jsonify({'error': 'Internal server error'}), 500
-    
+
     return app
 
 if __name__ == '__main__':
