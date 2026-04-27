@@ -58,7 +58,8 @@ def test_connection():
     body = request.get_json(silent=True) or {}
     cfg = _validated(body)
     if isinstance(cfg, tuple):
-        return cfg  # error response
+        err, status = cfg
+        return jsonify(err), status
 
     try:
         connector = DBConnector({
@@ -89,7 +90,8 @@ def configure():
     body = request.get_json(silent=True) or {}
     cfg = _validated(body)
     if isinstance(cfg, tuple):
-        return cfg
+        err, status = cfg
+        return jsonify(err), status
 
     # Verify before persisting — easier to recover from a typo here than after.
     try:
@@ -115,7 +117,11 @@ def configure():
 
 
 def _validated(body: dict):
-    """Return a clean cfg dict or a (response, status) tuple if invalid."""
+    """
+    Pure validator — returns a clean cfg dict on success, or a
+    `({"error": ...}, status)` tuple on failure. Keeping this off Flask's
+    response stack lets it be unit-tested without an app context.
+    """
     host = (body.get("host") or "").strip()
     user = (body.get("user") or "").strip()
     password = body.get("password") or ""
@@ -123,11 +129,11 @@ def _validated(body: dict):
     try:
         port = int(body.get("port") or 1433)
     except (TypeError, ValueError):
-        return jsonify({"error": "port must be an integer"}), 400
+        return {"error": "port must be an integer"}, 400
 
     missing = [k for k, v in (("host", host), ("user", user), ("password", password)) if not v]
     if missing:
-        return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
+        return {"error": f"Missing required field(s): {', '.join(missing)}"}, 400
 
     return {"host": host, "port": port, "user": user, "password": password, "database": database}
 

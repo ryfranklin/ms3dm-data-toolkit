@@ -1,0 +1,35 @@
+# Local test runner — mirrors what CI does (pytest with pyodbc importable),
+# but on Linux so it works on Mac/Windows hosts via Docker. Image is rebuilt
+# from this file by `make test-docker`.
+#
+# Usage:
+#   docker build -f backend/Dockerfile.test -t ms3dm-test backend/
+#   docker run --rm ms3dm-test
+#
+# Or:
+#   make test-docker
+FROM python:3.11-slim
+
+# Microsoft ODBC Driver 18 — needed so pyodbc imports cleanly. Without this
+# the test_db_connector / test_local_etl_helpers / test_setup_validation
+# modules skip via `importorskip`, masking real failures.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl gnupg apt-transport-https ca-certificates \
+        unixodbc unixodbc-dev gcc g++ \
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+        > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir pytest
+
+# Source goes in last so pip layers cache across iterations.
+COPY . .
+
+CMD ["python", "-m", "pytest", "tests/", "-v"]

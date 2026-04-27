@@ -1,4 +1,4 @@
-.PHONY: help install dev up down logs clean backend-lint frontend-lint lint backend-format format typecheck
+.PHONY: help install dev up down logs clean backend-lint frontend-lint lint backend-format format typecheck test test-docker test-frontend
 
 help:
 	@echo "MS3DM Toolkit - Available Commands"
@@ -22,6 +22,11 @@ help:
 	@echo "  make typecheck  - Run type checker (backend)"
 	@echo "  make check      - Run all checks"
 	@echo "  make fix        - Fix all auto-fixable issues"
+	@echo ""
+	@echo "Tests:"
+	@echo "  make test          - Run pytest in local backend venv (skips pyodbc tests on Mac w/o unixodbc)"
+	@echo "  make test-frontend - Run vitest in frontend"
+	@echo "  make test-docker   - Run full pytest suite in Docker (matches CI)"
 
 # Docker commands
 up:
@@ -97,6 +102,19 @@ fix: backend-fix
 backend-fix:
 	cd backend && ruff check --fix .
 	cd backend && ruff format .
+
+# Tests
+test:
+	cd backend && .venv/bin/pytest tests/ -v
+
+test-frontend:
+	cd frontend && npm test
+
+# Mirrors CI exactly — runs the full backend pytest suite (including the
+# pyodbc-dependent modules that skip locally on macOS without unixodbc).
+test-docker:
+	docker build -f backend/Dockerfile.test -t ms3dm-test backend/
+	docker run --rm ms3dm-test
 
 # Clean caches
 clean-cache:

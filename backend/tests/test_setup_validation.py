@@ -47,11 +47,11 @@ def test_validated_defaults_port_and_database():
 
 def test_validated_rejects_missing_host():
     result = _validated({"user": "u", "password": "p"})
-    # The validator returns a Flask response tuple on error.
+    # The validator returns a (dict, status) tuple on error.
     assert isinstance(result, tuple)
-    response, status = result
+    err, status = result
     assert status == 400
-    assert "host" in response.get_json()["error"].lower()
+    assert "host" in err["error"].lower()
 
 
 def test_validated_rejects_missing_password():
@@ -66,6 +66,6 @@ def test_validated_rejects_non_integer_port():
         "host": "h", "user": "u", "password": "p", "port": "not-a-number",
     })
     assert isinstance(result, tuple)
-    response, status = result
+    err, status = result
     assert status == 400
-    assert "port" in response.get_json()["error"].lower()
+    assert "port" in err["error"].lower()
