@@ -30,9 +30,27 @@ from services.duckdb_query import (
 
 local_etl_bp = Blueprint("local_etl", __name__)
 
-DEFAULT_STORAGE_PATH = "./local_storage"
+DEFAULT_STORAGE_PATH = "./local_storage"  # dev-mode fallback (relative to CWD)
 SETTINGS_KEY = "local_etl_storage_path"
 MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
+
+
+def _default_storage_path() -> str:
+    """
+    Return the appropriate default storage directory for the current runtime.
+
+    - Bundled (PyInstaller exe): per-user data dir alongside config.json
+      (e.g. `%APPDATA%/ms3dm-toolkit/local_storage`). Avoids the
+      `C:\\Windows\\local_storage` trap that hits when the exe's CWD
+      lands somewhere unwritable.
+    - Dev / Docker: relative `./local_storage` so existing workflows
+      (volume mounts, `make run`) keep working unchanged.
+    """
+    import sys
+    if getattr(sys, "frozen", False):
+        from services.app_config import config_dir
+        return str(config_dir() / "local_storage")
+    return DEFAULT_STORAGE_PATH
 
 # Rows per executemany batch. SQL Server's fast_executemany peaks around 5K;
 # smaller batches give more frequent progress updates.
@@ -72,7 +90,7 @@ def _get_storage_path() -> str:
     """Get the configured storage directory path."""
     store = current_app.config["METADATA_STORE"]
     path = store.get_setting(SETTINGS_KEY)
-    return path or DEFAULT_STORAGE_PATH
+    return path or _default_storage_path()
 
 
 def _resolve_storage_path() -> str:
@@ -200,7 +218,16 @@ def upload_file():
         return jsonify({"error": f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024*1024)} MB"}), 400
 
     storage = _resolve_storage_path()
-    os.makedirs(storage, exist_ok=True)
+    try:
+        os.makedirs(storage, exist_ok=True)
+    except OSError as exc:
+        return jsonify({
+            "error": (
+                f"Cannot access storage directory '{storage}': {exc}. "
+                f"Update Storage Settings (gear icon in Local ETL) to point at "
+                f"a folder you have write access to."
+            )
+        }), 500
 
     dest = os.path.join(storage, safe_name)
     file.save(dest)
