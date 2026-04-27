@@ -156,7 +156,9 @@ def get_table_details(schema, table):
         """
         foreign_keys = db.execute_query(fk_query, (schema, table))
 
-        # Get indexes with detailed information
+        # Get indexes with detailed information.
+        # FOR XML PATH('') / STUFF instead of STRING_AGG so this works on
+        # SQL Server 2012-2016 (STRING_AGG requires 2017+).
         index_query = """
             SELECT
                 i.name as INDEX_NAME,
@@ -164,28 +166,31 @@ def get_table_details(schema, table):
                 i.is_unique,
                 i.is_primary_key,
                 i.filter_definition as FILTER_DEFINITION,
-                (
-                    SELECT STRING_AGG(c.name + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE ' ASC' END, ', ') WITHIN GROUP (ORDER BY ic.key_ordinal)
+                STUFF((
+                    SELECT ', ' + c.name + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE ' ASC' END
                     FROM sys.index_columns ic
                     INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
                     WHERE ic.object_id = i.object_id
                         AND ic.index_id = i.index_id
                         AND ic.is_included_column = 0
-                ) as KEY_COLUMNS,
-                (
-                    SELECT STRING_AGG(c.name, ', ')
+                    ORDER BY ic.key_ordinal
+                    FOR XML PATH(''), TYPE
+                ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') as KEY_COLUMNS,
+                STUFF((
+                    SELECT ', ' + c.name
                     FROM sys.index_columns ic
                     INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
                     WHERE ic.object_id = i.object_id
                         AND ic.index_id = i.index_id
                         AND ic.is_included_column = 1
-                ) as INCLUDED_COLUMNS
+                    FOR XML PATH(''), TYPE
+                ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') as INCLUDED_COLUMNS
             FROM sys.indexes i
-            WHERE i.object_id = OBJECT_ID(? + '.' + ?)
+            WHERE i.object_id = OBJECT_ID(?)
                 AND i.name IS NOT NULL
             ORDER BY i.is_primary_key DESC, i.name
         """
-        indexes = db.execute_query(index_query, (schema, table))
+        indexes = db.execute_query(index_query, (f"{schema}.{table}",))
 
         # Load custom metadata from SQL
         custom_metadata = _store().get_catalog_metadata(connection_id, schema, table) or {}
