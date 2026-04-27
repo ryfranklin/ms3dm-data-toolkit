@@ -265,6 +265,8 @@ export const localEtlApi = {
   deletePipeline: (id) => apiClient.delete(`/api/local-etl/pipelines/${id}`),
   listPipelineRuns: (params = {}) =>
     apiClient.get('/api/local-etl/pipeline-runs', { params }),
+  getPipelineRun: (runId) =>
+    apiClient.get(`/api/local-etl/pipeline-runs/${runId}`),
 };
 
 // Setup API (first-run wizard for the desktop bundle)

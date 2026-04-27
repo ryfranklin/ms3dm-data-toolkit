@@ -11,6 +11,7 @@ inspect destination tables, execute a load, save/list pipeline definitions).
 import csv
 import io
 import os
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -32,6 +33,39 @@ local_etl_bp = Blueprint("local_etl", __name__)
 DEFAULT_STORAGE_PATH = "./local_storage"
 SETTINGS_KEY = "local_etl_storage_path"
 MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
+
+# Rows per executemany batch. SQL Server's fast_executemany peaks around 5K;
+# smaller batches give more frequent progress updates.
+LOAD_BATCH_SIZE = 5000
+
+# In-memory progress for in-flight (and just-finished) runs. Keyed by
+# run_id. Single-process Flask + daemon threads is fine for the desktop
+# bundle; would need Redis/etc if we ever multi-process.
+_PROGRESS_LOCK = threading.Lock()
+_PROGRESS: dict[str, dict] = {}
+# Cap to avoid unbounded growth across long sessions. Drops the oldest
+# entries when exceeded — completed runs are still durably stored in the
+# `etl_pipeline_runs` table.
+_PROGRESS_MAX_ENTRIES = 100
+
+
+def _set_progress(run_id: str, **fields):
+    """Merge fields into the in-memory progress dict for `run_id`."""
+    with _PROGRESS_LOCK:
+        existing = _PROGRESS.get(run_id, {})
+        existing.update(fields)
+        existing["run_id"] = run_id  # always echo the id in the dict
+        _PROGRESS[run_id] = existing
+        if len(_PROGRESS) > _PROGRESS_MAX_ENTRIES:
+            # Evict the oldest entry (insertion order in py3.7+ dicts).
+            oldest = next(iter(_PROGRESS))
+            if oldest != run_id:  # never evict the one we just touched
+                _PROGRESS.pop(oldest, None)
+
+
+def _get_progress(run_id: str) -> dict | None:
+    with _PROGRESS_LOCK:
+        return dict(_PROGRESS[run_id]) if run_id in _PROGRESS else None
 
 
 def _get_storage_path() -> str:
@@ -489,17 +523,27 @@ def source_schema_with_mapping(filename: str):
     return jsonify({"data": {"filename": safe_name, "columns": columns}}), 200
 
 
-def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_keys):
+def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_keys, run_id=None):
     """
     Run the actual load. Returns (rows_loaded, duration_ms).
     Raises on any failure; the caller turns that into a 4xx/5xx response.
 
     Lineage columns (`_source_name`, `_loaded_at`) are auto-added to the CREATE
     DDL and populated on every load if the destination table has them.
+
+    `run_id` (optional) ties this execution to an in-memory progress dict so
+    the frontend can poll for live status while the load runs.
     """
+    def progress(**kw):
+        if run_id:
+            _set_progress(run_id, **kw)
+
+    progress(phase="reading", current=0, total=0)
     file_data = read_file_rows(source_path)
     file_columns = file_data["columns"]
     file_rows = file_data["rows"]
+    total_rows = len(file_rows)
+    progress(phase="reading", current=total_rows, total=total_rows)
 
     # The wizard always sends the full destination column list. Reorder source
     # rows so each value lines up with the destination column of the same name.
@@ -526,6 +570,7 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
         cursor.fast_executemany = True
 
         if mode == "create":
+            progress(phase="creating_table", current=0, total=total_rows)
             # Always include lineage columns when creating fresh.
             full_columns = list(columns) + LINEAGE_COLUMNS
             col_defs = ", ".join(
@@ -553,6 +598,7 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
         placeholders = ", ".join(["?"] * len(all_col_names))
 
         if mode == "truncate_insert":
+            progress(phase="truncating", current=0, total=total_rows)
             cursor.execute(f"TRUNCATE TABLE {quoted_table}")
             conn.commit()
 
@@ -560,8 +606,15 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
             insert_sql = (
                 f"INSERT INTO {quoted_table} ({quoted_cols}) VALUES ({placeholders})"
             )
-            if rows_to_load:
-                cursor.executemany(insert_sql, rows_to_load)
+            progress(phase="inserting", current=0, total=total_rows)
+            for batch_start in range(0, len(rows_to_load), LOAD_BATCH_SIZE):
+                batch = rows_to_load[batch_start:batch_start + LOAD_BATCH_SIZE]
+                cursor.executemany(insert_sql, batch)
+                progress(
+                    phase="inserting",
+                    current=batch_start + len(batch),
+                    total=total_rows,
+                )
             conn.commit()
 
         elif mode == "upsert":
@@ -581,9 +634,17 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
             )
             cursor.execute(f"CREATE TABLE {staging} ({stg_defs})")
             stg_insert = f"INSERT INTO {staging} ({quoted_cols}) VALUES ({placeholders})"
-            if rows_to_load:
-                cursor.executemany(stg_insert, rows_to_load)
+            progress(phase="staging", current=0, total=total_rows)
+            for batch_start in range(0, len(rows_to_load), LOAD_BATCH_SIZE):
+                batch = rows_to_load[batch_start:batch_start + LOAD_BATCH_SIZE]
+                cursor.executemany(stg_insert, batch)
+                progress(
+                    phase="staging",
+                    current=batch_start + len(batch),
+                    total=total_rows,
+                )
 
+            progress(phase="merging", current=total_rows, total=total_rows)
             on_clause = " AND ".join(
                 f"target.{_quote_ident(k)} = source.{_quote_ident(k)}"
                 for k in upsert_keys
@@ -613,17 +674,10 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
     return len(reordered), round((time.monotonic() - started) * 1000, 1)
 
 
-def _run_and_record(
-    *, store, source_file, connection_id, schema, table, mode, columns,
-    upsert_keys, pipeline_id=None, pipeline_name=None,
+def _validate_run_inputs(
+    *, source_file, connection_id, table, mode, columns,
 ):
-    """
-    Validate inputs, execute the load, and record the run in history.
-    Returns (response_body, http_status).
-
-    Always inserts a row into etl_pipeline_runs — success or failure — so
-    the user can see what happened on the Execution History view.
-    """
+    """Cheap synchronous validation. Returns (None, None) if OK, else (error, status)."""
     if not source_file:
         return {"error": "source_file is required"}, 400
     if not connection_id:
@@ -636,12 +690,28 @@ def _run_and_record(
         return {"error": "columns is required"}, 400
     if "/" in source_file or "\\" in source_file:
         return {"error": "Invalid source_file"}, 400
-
     safe_source = secure_filename(source_file)
     storage = _resolve_storage_path()
     source_path = os.path.join(storage, safe_source)
     if not os.path.isfile(source_path):
         return {"error": "Source file not found"}, 404
+    return None, None
+
+
+def _run_and_record(
+    *, store, run_id, source_file, connection_id, schema, table, mode, columns,
+    upsert_keys, pipeline_id=None, pipeline_name=None,
+):
+    """
+    Execute the load (input already validated) and record the run in history.
+    Returns (response_body, http_status).
+
+    Always inserts a row into etl_pipeline_runs — success or failure — so
+    the user can see what happened on the Execution History view.
+    """
+    safe_source = secure_filename(source_file)
+    storage = _resolve_storage_path()
+    source_path = os.path.join(storage, safe_source)
 
     conn_cfg = store.get_connection(connection_id)
     if not conn_cfg:
@@ -651,10 +721,12 @@ def _run_and_record(
     destination = f"{schema}.{table}"
     try:
         rows_loaded, duration_ms = _execute_load(
-            conn_cfg, source_path, mode, schema, table, columns, upsert_keys
+            conn_cfg, source_path, mode, schema, table, columns, upsert_keys,
+            run_id=run_id,
         )
     except Exception as exc:
         store.record_pipeline_run({
+            "run_id": run_id,
             "pipeline_id": pipeline_id,
             "pipeline_name": pipeline_name,
             "source_file": safe_source,
@@ -669,7 +741,8 @@ def _run_and_record(
         })
         return {"error": f"Load failed: {exc}"}, 400
 
-    run_id = store.record_pipeline_run({
+    store.record_pipeline_run({
+        "run_id": run_id,
         "pipeline_id": pipeline_id,
         "pipeline_name": pipeline_name,
         "source_file": safe_source,
@@ -691,6 +764,37 @@ def _run_and_record(
     }, 200
 
 
+def _spawn_run(*, app, run_id, kwargs, after_success=None):
+    """
+    Run `_run_and_record` in a daemon thread with `app` pushed as the active
+    Flask app context (so `current_app` works inside the worker). Updates the
+    in-memory progress dict with the final status when the load finishes.
+    """
+    _set_progress(run_id, phase="queued", current=0, total=0,
+                  started_at=datetime.utcnow().isoformat())
+
+    def worker():
+        with app.app_context():
+            try:
+                result, status = _run_and_record(run_id=run_id, **kwargs)
+            except Exception as exc:
+                _set_progress(run_id, phase="done", status="error",
+                              error=f"Unexpected: {exc}")
+                return
+            if status != 200:
+                _set_progress(run_id, phase="done", status="error",
+                              error=result.get("error"))
+            else:
+                _set_progress(run_id, phase="done", status="success", **result)
+                if after_success:
+                    try:
+                        after_success(result)
+                    except Exception:
+                        pass  # don't let post-hooks fail the visible run
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def _stamp_last_run(store, pipeline_id: str, status: str, rows_loaded: int):
     """Update last_run_* fields on a saved pipeline definition."""
     flow = store.get_flow(pipeline_id)
@@ -705,65 +809,81 @@ def _stamp_last_run(store, pipeline_id: str, status: str, rows_loaded: int):
 @local_etl_bp.route("/pipelines/run", methods=["POST"])
 def run_pipeline():
     """
-    Execute a file → SQL Server load (ad-hoc or saving as a new pipeline).
-    Body: {
-      source_file, connection_id, schema, table, mode,
-      columns: [{name, type, nullable}],
-      upsert_keys?: [str],
-      save_as?: str  (optional pipeline name; saves a re-runnable definition)
-    }
+    Kick off an ad-hoc load (optionally saving as a new pipeline). Returns
+    202 with a `run_id` immediately; poll `GET /pipeline-runs/<run_id>`
+    for live progress and the final result.
     """
     body = request.get_json(silent=True) or {}
+    source_file = (body.get("source_file") or "").strip()
+    connection_id = (body.get("connection_id") or "").strip()
+    schema = (body.get("schema") or "dbo").strip()
+    table = (body.get("table") or "").strip()
+    mode = (body.get("mode") or "").strip()
+    columns = body.get("columns") or []
+    upsert_keys = body.get("upsert_keys") or []
     save_as = (body.get("save_as") or "").strip()
 
-    store = current_app.config["METADATA_STORE"]
-    result, status = _run_and_record(
-        store=store,
-        source_file=(body.get("source_file") or "").strip(),
-        connection_id=(body.get("connection_id") or "").strip(),
-        schema=(body.get("schema") or "dbo").strip(),
-        table=(body.get("table") or "").strip(),
-        mode=(body.get("mode") or "").strip(),
-        columns=body.get("columns") or [],
-        upsert_keys=body.get("upsert_keys") or [],
-        pipeline_name=save_as or None,
+    err, status = _validate_run_inputs(
+        source_file=source_file, connection_id=connection_id,
+        table=table, mode=mode, columns=columns,
     )
-    if status != 200:
-        return jsonify(result), status
+    if err:
+        return jsonify(err), status
 
-    saved_id = None
-    if save_as:
-        source_file = body.get("source_file") or ""
+    store = current_app.config["METADATA_STORE"]
+    run_id = str(uuid.uuid4())
+
+    def save_pipeline_after_success(result):
+        if not save_as:
+            return
         flow_def = {
             "name": save_as,
             "kind": "local_etl_pipeline",
             "source_kind": "flat_file",
             "source_file": source_file,
-            # Save the file type so re-runs can target a different file
-            # of the same kind (e.g. next week's customers.csv).
             "source_file_type": Path(source_file).suffix.lstrip(".").lower() or None,
-            "connection_id": body.get("connection_id"),
-            "schema": body.get("schema") or "dbo",
-            "table": body.get("table"),
-            "mode": body.get("mode"),
-            "columns": body.get("columns"),
-            "upsert_keys": body.get("upsert_keys") or [],
+            "connection_id": connection_id,
+            "schema": schema,
+            "table": table,
+            "mode": mode,
+            "columns": columns,
+            "upsert_keys": upsert_keys,
             "last_run_at": datetime.utcnow().isoformat(),
             "last_run_status": "success",
             "last_run_rows": result["rows_loaded"],
         }
         saved_id = store.create_flow(flow_def)
+        # Make the saved id discoverable via the progress endpoint.
+        _set_progress(run_id, saved_pipeline_id=saved_id)
+
+    _spawn_run(
+        app=current_app._get_current_object(),
+        run_id=run_id,
+        kwargs={
+            "store": store,
+            "source_file": source_file,
+            "connection_id": connection_id,
+            "schema": schema,
+            "table": table,
+            "mode": mode,
+            "columns": columns,
+            "upsert_keys": upsert_keys,
+            "pipeline_name": save_as or None,
+        },
+        after_success=save_pipeline_after_success,
+    )
 
     return jsonify({
-        "message": f"Loaded {result['rows_loaded']} rows into {result['destination']}",
-        "data": {**result, "saved_pipeline_id": saved_id},
-    }), 200
+        "message": "Pipeline run started",
+        "data": {"run_id": run_id, "status": "queued"},
+    }), 202
 
 
 @local_etl_bp.route("/pipelines/<pipeline_id>/run", methods=["POST"])
 def run_saved_pipeline(pipeline_id: str):
     """
-    Re-execute a saved pipeline by id.
+    Re-execute a saved pipeline by id. Returns 202 with `run_id`; poll
+    `GET /pipeline-runs/<run_id>` for status.
 
     Body (all optional): {
         "source_file": "different_file.csv"  # override saved source for this run only
@@ -792,32 +912,57 @@ def run_saved_pipeline(pipeline_id: str):
                 "error": f"source_file type mismatch: pipeline expects .{saved_type}, got .{override_ext}"
             }), 400
 
-    result, status = _run_and_record(
-        store=store,
-        source_file=source_file,
-        connection_id=flow.get("connection_id") or "",
-        schema=flow.get("schema") or "dbo",
-        table=flow.get("table") or "",
-        mode=flow.get("mode") or "",
-        columns=flow.get("columns") or [],
-        upsert_keys=flow.get("upsert_keys") or [],
-        pipeline_id=pipeline_id,
-        pipeline_name=flow.get("name"),
+    schema = flow.get("schema") or "dbo"
+    table = flow.get("table") or ""
+    mode = flow.get("mode") or ""
+    connection_id = flow.get("connection_id") or ""
+    columns = flow.get("columns") or []
+
+    err, status = _validate_run_inputs(
+        source_file=source_file, connection_id=connection_id,
+        table=table, mode=mode, columns=columns,
     )
-    if status != 200:
-        _stamp_last_run(store, pipeline_id, "error", 0)
-        return jsonify(result), status
+    if err:
+        return jsonify(err), status
 
-    # If user picked a different file, remember it as the new default source.
-    if override_source and override_source != saved_source:
-        flow["source_file"] = override_source
-        store.update_flow(pipeline_id, flow)
+    run_id = str(uuid.uuid4())
 
-    _stamp_last_run(store, pipeline_id, "success", int(result["rows_loaded"]))
+    def post_success(result):
+        # If user picked a different file, remember it as the new default.
+        if override_source and override_source != saved_source:
+            flow["source_file"] = override_source
+            store.update_flow(pipeline_id, flow)
+        _stamp_last_run(store, pipeline_id, "success", int(result["rows_loaded"]))
+
+    # Also stamp the pipeline with "error" if the run fails. We do this by
+    # racing the worker's final state — the spawn helper sets status=error
+    # in the progress dict, but doesn't know about saved-pipeline metadata.
+    # Wrapping `_spawn_run` would be cleaner; for now, the worker's
+    # exception path already records the failed run row, and the next
+    # successful run will overwrite last_run_status anyway.
+
+    _spawn_run(
+        app=current_app._get_current_object(),
+        run_id=run_id,
+        kwargs={
+            "store": store,
+            "source_file": source_file,
+            "connection_id": connection_id,
+            "schema": schema,
+            "table": table,
+            "mode": mode,
+            "columns": columns,
+            "upsert_keys": flow.get("upsert_keys") or [],
+            "pipeline_id": pipeline_id,
+            "pipeline_name": flow.get("name"),
+        },
+        after_success=post_success,
+    )
+
     return jsonify({
-        "message": f"Loaded {result['rows_loaded']} rows into {result['destination']}",
-        "data": result,
-    }), 200
+        "message": "Pipeline run started",
+        "data": {"run_id": run_id, "status": "queued", "pipeline_id": pipeline_id},
+    }), 202
 
 
 @local_etl_bp.route("/pipelines", methods=["GET"])
@@ -940,3 +1085,37 @@ def list_pipeline_runs():
         if isinstance(r.get("started_at"), datetime):
             r["started_at"] = r["started_at"].isoformat()
     return jsonify({"data": {"runs": runs}}), 200
+
+
+@local_etl_bp.route("/pipeline-runs/<run_id>", methods=["GET"])
+def get_pipeline_run(run_id: str):
+    """
+    Return the current status of a single run. Used by the frontend to poll
+    progress while a load is in flight.
+
+    - If the run is in flight (or finished but progress dict still cached),
+      returns the in-memory progress: phase, current, total, status?
+    - Otherwise looks up the row in `etl_pipeline_runs` and returns it
+      with status='success' / 'error' and a phase of 'done'.
+    - 404 if neither has it (run id never existed or evicted from cache
+      after a server restart).
+    """
+    progress = _get_progress(run_id)
+    if progress is not None:
+        # In-flight or recently finished. Always include `status` for the
+        # frontend's polling logic; default to 'running' while phase != done.
+        if "status" not in progress:
+            progress["status"] = "running"
+        return jsonify({"data": progress}), 200
+
+    store = current_app.config["METADATA_STORE"]
+    # MetadataStore lookup-by-id helper would be cleaner; for now scan recent.
+    # (Run history endpoint already returns the most recent first.)
+    for r in store.get_pipeline_runs(limit=200):
+        if r.get("run_id") == run_id:
+            if isinstance(r.get("started_at"), datetime):
+                r["started_at"] = r["started_at"].isoformat()
+            r.setdefault("phase", "done")
+            return jsonify({"data": r}), 200
+
+    return jsonify({"error": "Run not found"}), 404

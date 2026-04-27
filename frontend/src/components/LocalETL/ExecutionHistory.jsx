@@ -1,16 +1,11 @@
 import React, { useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { localEtlApi } from '../../api/client';
+import { formatDuration as fmtDuration } from '../../lib/etlUtils';
 
 const STATUS_STYLES = {
   success: 'bg-green-100 text-green-800',
   error: 'bg-red-100 text-red-800',
 };
-
-function fmtDuration(ms) {
-  if (ms == null) return '—';
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
-}
 
 function fmtTime(iso) {
   if (!iso) return '—';

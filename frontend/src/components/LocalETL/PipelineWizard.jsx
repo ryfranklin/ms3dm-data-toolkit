@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { localEtlApi } from '../../api/client';
+import RunProgress, { usePipelineRun } from './RunProgress';
 
 const STEPS = [
   { key: 'source', label: 'Source' },
   { key: 'destination', label: 'Destination' },
+  { key: 'mapping', label: 'Mapping' },
   { key: 'review', label: 'Review & Run' },
 ];
 
@@ -20,6 +22,10 @@ export default function PipelineWizard({
   const [sourceColumns, setSourceColumns] = useState([]);  // [{name, duckdb_type, sql_type, nullable}]
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState(null);
+  // Snapshot of sql_type values the user has explicitly "saved" — used to
+  // show a per-row "edited / saved" indicator and an enabled Save button.
+  const [savedSqlTypes, setSavedSqlTypes] = useState({});  // { columnName: sql_type }
+  const [columnsJustSaved, setColumnsJustSaved] = useState(false);
 
   // Destination state
   const [connections, setConnections] = useState([]);
@@ -34,11 +40,28 @@ export default function PipelineWizard({
   const [destChecking, setDestChecking] = useState(false);
   const [destError, setDestError] = useState(null);
 
+  // Mapping verification — must be checked before the user can advance to
+  // the run step. Resets if the source or destination changes.
+  const [mappingVerified, setMappingVerified] = useState(false);
+
   // Review / save / run state
   const [saveAs, setSaveAs] = useState(editingPipeline?.name || '');
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState(null);
   const [runError, setRunError] = useState(null);
+  const [runId, setRunId] = useState(null);  // set after POST → triggers polling
+
+  // Polls the backend while a run is in flight; calls onFinished when done.
+  const liveRun = usePipelineRun(runId, {
+    onFinished: (final) => {
+      if (final.status === 'success') {
+        setRunResult(final);
+        onComplete?.();
+      } else {
+        setRunError(final.error || 'Pipeline run failed');
+      }
+    },
+  });
 
   // Load source schema whenever the file changes. In edit mode, overlay any
   // SQL types the user customized last time onto the fresh schema so their
@@ -50,18 +73,21 @@ export default function PipelineWizard({
     localEtlApi.getSourceSchema(sourceFile)
       .then((res) => {
         const fresh = res.data.columns;
+        let initial;
         if (isEditing && editingPipeline?.columns?.length) {
           const savedTypes = new Map(
             editingPipeline.columns.map((c) => [c.name, c.type])
           );
-          setSourceColumns(
-            fresh.map((c) =>
-              savedTypes.has(c.name) ? { ...c, sql_type: savedTypes.get(c.name) } : c
-            )
+          initial = fresh.map((c) =>
+            savedTypes.has(c.name) ? { ...c, sql_type: savedTypes.get(c.name) } : c
           );
         } else {
-          setSourceColumns(fresh);
+          initial = fresh;
         }
+        setSourceColumns(initial);
+        // Treat the just-loaded values as the baseline "saved" snapshot.
+        setSavedSqlTypes(Object.fromEntries(initial.map((c) => [c.name, c.sql_type])));
+        setColumnsJustSaved(false);
       })
       .catch((err) => setSourceError(err.message))
       .finally(() => setSourceLoading(false));
@@ -153,6 +179,27 @@ export default function PipelineWizard({
     setSourceColumns((cols) =>
       cols.map((c, i) => (i === idx ? { ...c, sql_type: newType } : c))
     );
+    setColumnsJustSaved(false);
+  };
+
+  // Any change to the source columns or destination invalidates the prior
+  // verification — force the user to re-confirm.
+  useEffect(() => {
+    setMappingVerified(false);
+  }, [sourceFile, connectionId, destSchema, destTable, mode]);
+
+  const dirtyColumnNames = useMemo(
+    () => sourceColumns
+      .filter((c) => savedSqlTypes[c.name] !== undefined && c.sql_type !== savedSqlTypes[c.name])
+      .map((c) => c.name),
+    [sourceColumns, savedSqlTypes]
+  );
+
+  const saveColumnTypes = () => {
+    setSavedSqlTypes(Object.fromEntries(sourceColumns.map((c) => [c.name, c.sql_type])));
+    setColumnsJustSaved(true);
+    // Clear the "just saved" badge after a moment so it doesn't linger.
+    setTimeout(() => setColumnsJustSaved(false), 2500);
   };
 
   const toggleUpsertKey = (colName) => {
@@ -161,7 +208,8 @@ export default function PipelineWizard({
     );
   };
 
-  const canAdvanceFromSource = sourceFile && sourceColumns.length > 0 && !sourceError;
+  const canAdvanceFromSource =
+    sourceFile && sourceColumns.length > 0 && !sourceError && dirtyColumnNames.length === 0;
   const canAdvanceFromDest =
     connectionId &&
     destTable.trim() &&
@@ -169,12 +217,16 @@ export default function PipelineWizard({
     mode &&
     (mode !== 'upsert' || upsertKeys.length > 0) &&
     destinationColumns.length > 0;
+  const canAdvanceFromMapping = mappingVerified && destinationColumns.length > 0;
 
   // In create mode: POST /pipelines/run (with optional save_as).
   // In edit mode: PUT /pipelines/<id>, then optionally POST /pipelines/<id>/run.
+  // Run endpoints are async: POST returns a run_id; we poll for progress.
   const runPipeline = async ({ executeAfterSave = true } = {}) => {
     setRunning(true);
     setRunError(null);
+    setRunId(null);
+    setRunResult(null);
     try {
       const payload = {
         source_file: sourceFile,
@@ -193,29 +245,29 @@ export default function PipelineWizard({
         });
         if (executeAfterSave) {
           const runRes = await localEtlApi.runSavedPipeline(editingPipeline.id);
-          setRunResult(runRes.data);
+          setRunId(runRes.data.run_id);
         } else {
           setRunResult({ saved_only: true });
+          onComplete?.();
         }
       } else if (!executeAfterSave) {
-        // Create mode, Save Only: definition saved, no execution.
         if (!saveAs.trim()) {
           throw new Error('Pipeline name is required to save.');
         }
         await localEtlApi.createPipeline({ name: saveAs.trim(), ...payload });
         setRunResult({ saved_only: true });
+        onComplete?.();
       } else {
         const res = await localEtlApi.runPipeline({
           ...payload,
           save_as: saveAs.trim() || undefined,
         });
-        setRunResult(res.data);
+        setRunId(res.data.run_id);
       }
-      onComplete?.();
     } catch (err) {
       setRunError(err.message);
     } finally {
-      setRunning(false);
+      setRunning(false);  // POST completed; polling continues via runId
     }
   };
 
@@ -266,6 +318,10 @@ export default function PipelineWizard({
               error={sourceError}
               updateColumnType={updateColumnType}
               onFilesChanged={onFilesChanged}
+              dirtyColumnNames={dirtyColumnNames}
+              savedSqlTypes={savedSqlTypes}
+              saveColumnTypes={saveColumnTypes}
+              columnsJustSaved={columnsJustSaved}
             />
           )}
           {step === 'destination' && (
@@ -292,6 +348,21 @@ export default function PipelineWizard({
               onGoToTargets={onGoToTargets}
             />
           )}
+          {step === 'mapping' && (
+            <MappingStep
+              sourceFile={sourceFile}
+              sourceColumns={sourceColumns}
+              destSchema={destSchema}
+              destTable={destTable}
+              tableExists={tableExists}
+              mode={mode}
+              destinationColumns={destinationColumns}
+              upsertKeys={upsertKeys}
+              missingFromSource={missingFromSource}
+              mappingVerified={mappingVerified}
+              setMappingVerified={setMappingVerified}
+            />
+          )}
           {step === 'review' && (
             <ReviewStep
               isEditing={isEditing}
@@ -308,6 +379,8 @@ export default function PipelineWizard({
               runResult={runResult}
               runError={runError}
               running={running}
+              liveRun={liveRun}
+              runId={runId}
             />
           )}
         </div>
@@ -333,14 +406,15 @@ export default function PipelineWizard({
                 onClick={() => setStepIndex((i) => i + 1)}
                 disabled={
                   (step === 'source' && !canAdvanceFromSource) ||
-                  (step === 'destination' && !canAdvanceFromDest)
+                  (step === 'destination' && !canAdvanceFromDest) ||
+                  (step === 'mapping' && !canAdvanceFromMapping)
                 }
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50"
               >
                 Next
               </button>
             )}
-            {step === 'review' && !runResult && !isEditing && (
+            {step === 'review' && !runResult && !runId && !isEditing && (
               <>
                 {saveAs.trim() && (
                   <button
@@ -356,11 +430,11 @@ export default function PipelineWizard({
                   disabled={running}
                   className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 disabled:opacity-50"
                 >
-                  {running ? 'Running…' : saveAs.trim() ? 'Save & Run' : 'Run Pipeline'}
+                  {running ? 'Starting…' : saveAs.trim() ? 'Save & Run' : 'Run Pipeline'}
                 </button>
               </>
             )}
-            {step === 'review' && !runResult && isEditing && (
+            {step === 'review' && !runResult && !runId && isEditing && (
               <>
                 <button
                   onClick={() => runPipeline({ executeAfterSave: false })}
@@ -374,7 +448,7 @@ export default function PipelineWizard({
                   disabled={running}
                   className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 disabled:opacity-50"
                 >
-                  {running ? 'Running…' : 'Save & Run'}
+                  {running ? 'Starting…' : 'Save & Run'}
                 </button>
               </>
             )}
@@ -387,7 +461,11 @@ export default function PipelineWizard({
 
 // ----- Step components ----- //
 
-function SourceStep({ files, sourceFile, setSourceFile, sourceColumns, loading, error, updateColumnType, onFilesChanged }) {
+function SourceStep({
+  files, sourceFile, setSourceFile, sourceColumns, loading, error,
+  updateColumnType, onFilesChanged,
+  dirtyColumnNames = [], savedSqlTypes = {}, saveColumnTypes, columnsJustSaved = false,
+}) {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
@@ -479,11 +557,18 @@ function SourceStep({ files, sourceFile, setSourceFile, sourceColumns, loading, 
 
       {sourceColumns.length > 0 && (
         <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-2">
-            Detected columns ({sourceColumns.length})
-          </h3>
+          <div className="flex items-baseline justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-700">
+              Detected columns ({sourceColumns.length})
+            </h3>
+            <ColumnSaveStatus
+              dirtyCount={dirtyColumnNames.length}
+              justSaved={columnsJustSaved}
+              onSave={saveColumnTypes}
+            />
+          </div>
           <p className="text-xs text-gray-500 mb-2">
-            SQL Server types are inferred from the file. Edit them now if you'll be creating a new destination table.
+            SQL Server types are inferred from the file. Edit them now if you'll be creating a new destination table — click <strong>Save column types</strong> to lock in your edits.
           </p>
           <div className="border rounded overflow-hidden">
             <table className="w-full text-sm">
@@ -492,22 +577,40 @@ function SourceStep({ files, sourceFile, setSourceFile, sourceColumns, loading, 
                   <th className="text-left px-3 py-2">Column</th>
                   <th className="text-left px-3 py-2">Source type</th>
                   <th className="text-left px-3 py-2">SQL Server type</th>
+                  <th className="text-left px-3 py-2 w-20"></th>
                 </tr>
               </thead>
               <tbody>
-                {sourceColumns.map((c, i) => (
-                  <tr key={c.name} className="border-t">
-                    <td className="px-3 py-1.5 font-mono text-xs">{c.name}</td>
-                    <td className="px-3 py-1.5 text-xs text-gray-500">{c.duckdb_type}</td>
-                    <td className="px-3 py-1.5">
-                      <input
-                        value={c.sql_type}
-                        onChange={(e) => updateColumnType(i, e.target.value)}
-                        className="w-full border border-gray-300 rounded px-2 py-1 font-mono text-xs"
-                      />
-                    </td>
-                  </tr>
-                ))}
+                {sourceColumns.map((c, i) => {
+                  const isDirty = dirtyColumnNames.includes(c.name);
+                  const wasModified = savedSqlTypes[c.name] !== undefined
+                    && savedSqlTypes[c.name] !== c.duckdb_type
+                    && c.sql_type === savedSqlTypes[c.name];
+                  return (
+                    <tr key={c.name} className={`border-t ${isDirty ? 'bg-amber-50' : ''}`}>
+                      <td className="px-3 py-1.5 font-mono text-xs">{c.name}</td>
+                      <td className="px-3 py-1.5 text-xs text-gray-500">{c.duckdb_type}</td>
+                      <td className="px-3 py-1.5">
+                        <input
+                          value={c.sql_type}
+                          onChange={(e) => updateColumnType(i, e.target.value)}
+                          className={`w-full border rounded px-2 py-1 font-mono text-xs ${
+                            isDirty ? 'border-amber-400' : 'border-gray-300'
+                          }`}
+                        />
+                      </td>
+                      <td className="px-3 py-1.5 text-xs">
+                        {isDirty ? (
+                          <span className="text-amber-700">unsaved</span>
+                        ) : wasModified ? (
+                          <span className="text-green-700">✓ saved</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -705,10 +808,126 @@ function DestinationStep({
   );
 }
 
+function MappingStep({
+  sourceFile, sourceColumns, destSchema, destTable, tableExists, mode,
+  destinationColumns, upsertKeys, missingFromSource,
+  mappingVerified, setMappingVerified,
+}) {
+  // Build a row per destination column: where is the data coming from in
+  // the source? `destinationColumns` is the set of columns we'll actually
+  // write — when the table already exists, this is the intersection of
+  // dest cols and source cols.
+  const sourceByName = useMemo(
+    () => Object.fromEntries(sourceColumns.map((c) => [c.name, c])),
+    [sourceColumns]
+  );
+
+  const lineagePreview = mode === 'create' || tableExists === false
+    ? ['_source_name', '_loaded_at']
+    : [];
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-gray-50 border border-gray-200 rounded p-3 text-sm">
+        <div className="flex items-center gap-3">
+          <code className="font-mono text-gray-900">{sourceFile}</code>
+          <span className="text-gray-400">→</span>
+          <code className="font-mono text-gray-900">{destSchema || 'dbo'}.{destTable}</code>
+          <span className="ml-auto text-xs px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded font-mono uppercase">
+            {mode}
+          </span>
+        </div>
+      </div>
+
+      {missingFromSource.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
+          The destination has columns the source file doesn't, so they'll be left at NULL:{' '}
+          <span className="font-mono">{missingFromSource.join(', ')}</span>
+        </div>
+      )}
+
+      <div>
+        <h3 className="text-sm font-medium text-gray-700 mb-2">
+          Column mapping ({destinationColumns.length} columns)
+        </h3>
+        <div className="border rounded overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">Source column</th>
+                <th className="text-left px-3 py-2 font-medium">Source type</th>
+                <th className="text-center px-2 py-2 font-medium w-6"></th>
+                <th className="text-left px-3 py-2 font-medium">Destination column</th>
+                <th className="text-left px-3 py-2 font-medium">Destination type</th>
+                <th className="text-left px-3 py-2 font-medium">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {destinationColumns.map((dc) => {
+                const sc = sourceByName[dc.name];
+                const isKey = upsertKeys.includes(dc.name);
+                return (
+                  <tr key={dc.name} className="border-t">
+                    <td className="px-3 py-1.5 font-mono">{sc?.name ?? <span className="text-gray-400">—</span>}</td>
+                    <td className="px-3 py-1.5 font-mono text-gray-500">{sc?.duckdb_type ?? '—'}</td>
+                    <td className="px-2 py-1.5 text-center text-gray-400">→</td>
+                    <td className="px-3 py-1.5 font-mono">{dc.name}</td>
+                    <td className="px-3 py-1.5 font-mono text-gray-700">{dc.type}</td>
+                    <td className="px-3 py-1.5 text-gray-500">
+                      {isKey && <span className="text-blue-700">upsert key</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {lineagePreview.map((name) => (
+                <tr key={name} className="border-t bg-purple-50">
+                  <td className="px-3 py-1.5 text-purple-700 italic">auto</td>
+                  <td className="px-3 py-1.5 text-purple-600 font-mono">—</td>
+                  <td className="px-2 py-1.5 text-center text-purple-400">→</td>
+                  <td className="px-3 py-1.5 font-mono text-purple-900">{name}</td>
+                  <td className="px-3 py-1.5 font-mono text-purple-700">
+                    {name === '_source_name' ? 'NVARCHAR(255)' : 'DATETIME2'}
+                  </td>
+                  <td className="px-3 py-1.5 text-purple-700 text-xs">
+                    auto-added on create
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {missingFromSource.length === 0 && lineagePreview.length === 0 && (
+          <p className="text-xs text-gray-500 mt-2">
+            All {destinationColumns.length} destination columns are present in the source.
+          </p>
+        )}
+      </div>
+
+      <label className="flex items-start gap-2 p-3 border-2 border-blue-200 bg-blue-50 rounded cursor-pointer">
+        <input
+          type="checkbox"
+          checked={mappingVerified}
+          onChange={(e) => setMappingVerified(e.target.checked)}
+          className="mt-0.5"
+        />
+        <div>
+          <div className="text-sm font-medium text-blue-900">
+            I've reviewed the column mapping and confirm it's correct.
+          </div>
+          <div className="text-xs text-blue-800 mt-0.5">
+            You'll get one more chance to back out on the next screen, but checking this
+            box unlocks the run buttons.
+          </div>
+        </div>
+      </label>
+    </div>
+  );
+}
+
 function ReviewStep({
   isEditing, sourceFile, connection, destSchema, destTable, mode,
   destinationColumns, upsertKeys, saveAs, setSaveAs,
-  runResult, runError, running,
+  runResult, runError, running, liveRun, runId,
 }) {
   const modeLabel = {
     create: 'Create new table',
@@ -736,7 +955,19 @@ function ReviewStep({
         )}
       </div>
 
-      {!runResult && !running && (
+      {runId && (
+        <div className="border border-gray-200 bg-white rounded p-3">
+          <RunProgress run={liveRun} />
+          {liveRun?.saved_pipeline_id && (
+            <p className="mt-2 text-xs text-gray-500">Pipeline saved.</p>
+          )}
+          {isEditing && liveRun?.status === 'success' && (
+            <p className="mt-2 text-xs text-gray-500">Definition updated.</p>
+          )}
+        </div>
+      )}
+
+      {!runResult && !running && !runId && (
         <div className="border border-blue-200 bg-blue-50 rounded p-3">
           <label className="flex items-center gap-2 text-sm font-medium text-blue-900 mb-1">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -770,22 +1001,10 @@ function ReviewStep({
         </div>
       )}
 
-      {runResult && runResult.saved_only && (
+      {runResult?.saved_only && (
         <div className="bg-green-50 border border-green-200 rounded p-3 text-sm text-green-800">
           <p className="font-medium">Pipeline definition saved.</p>
           <p className="mt-1">Use Re-run from the Saved list to execute it.</p>
-        </div>
-      )}
-
-      {runResult && !runResult.saved_only && (
-        <div className="bg-green-50 border border-green-200 rounded p-3 text-sm text-green-800">
-          <p className="font-medium">Loaded {runResult.rows_loaded} rows in {runResult.duration_ms} ms.</p>
-          {runResult.saved_pipeline_id && (
-            <p className="mt-1">Pipeline saved.</p>
-          )}
-          {isEditing && (
-            <p className="mt-1">Definition updated.</p>
-          )}
         </div>
       )}
     </div>
@@ -799,4 +1018,27 @@ function Row({ label, value }) {
       <div className="flex-1">{value}</div>
     </div>
   );
+}
+
+function ColumnSaveStatus({ dirtyCount, justSaved, onSave }) {
+  if (dirtyCount > 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-amber-700">
+          {dirtyCount} unsaved {dirtyCount === 1 ? 'change' : 'changes'}
+        </span>
+        <button
+          type="button"
+          onClick={onSave}
+          className="text-xs px-2 py-1 font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
+        >
+          Save column types
+        </button>
+      </div>
+    );
+  }
+  if (justSaved) {
+    return <span className="text-xs text-green-700">✓ Column types saved</span>;
+  }
+  return <span className="text-xs text-gray-400">All changes saved</span>;
 }

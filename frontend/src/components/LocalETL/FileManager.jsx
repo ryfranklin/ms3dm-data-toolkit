@@ -1,24 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { localEtlApi } from '../../api/client';
-
-function formatSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function joinPath(dir, name) {
-  if (!dir) return name;
-  return dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`;
-}
-
-// Mirrors backend `_view_name` in services/duckdb_query.py — keep in sync.
-function viewName(filename) {
-  const stem = filename.replace(/\.[^.]+$/, '');
-  let name = stem.replace(/[^a-zA-Z0-9_]/g, '_');
-  if (name && /^[0-9]/.test(name)) name = `f_${name}`;
-  return name || 'unnamed';
-}
+import { formatSize, joinPath, viewName } from '../../lib/etlUtils';
 
 const FILE_ICONS = {
   csv: '📊',
