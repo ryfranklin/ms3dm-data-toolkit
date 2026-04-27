@@ -28,7 +28,9 @@ class MetadataStore:
         self.port = int(cfg.get('port') or os.getenv('MS3DM_METADATA_PORT', '1433'))
         self.user = cfg.get('user') or os.getenv('MS3DM_METADATA_USER', 'sa')
         self.password = cfg.get('password') or os.getenv('MS3DM_METADATA_PASSWORD', '')
-        self.database = cfg.get('database') or os.getenv('MS3DM_METADATA_DATABASE', 'ms3dm_metadata')
+        # Late import to avoid a circular dependency at module-load time.
+        from services.app_config import DEFAULT_DATABASE_NAME
+        self.database = cfg.get('database') or os.getenv('MS3DM_METADATA_DATABASE', DEFAULT_DATABASE_NAME)
         self._local = threading.local()
 
     # ------------------------------------------------------------------ #

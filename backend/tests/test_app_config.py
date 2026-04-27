@@ -34,7 +34,7 @@ def test_save_then_load_round_trip(isolated_config_dir):
         "port": 1433,
         "user": "svc",
         "password": "p;w=d{x",  # special chars survive JSON roundtrip
-        "database": "ms3dm_metadata",
+        "database": "DataToolkit",
     }
     path = app_config.save_metadata_config(cfg)
     assert path.is_file()

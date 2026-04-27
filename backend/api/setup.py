@@ -9,6 +9,7 @@ exist when these endpoints are called).
 from flask import Blueprint, current_app, jsonify, request
 
 from services.app_config import (
+    DEFAULT_DATABASE_NAME,
     config_path,
     is_configured,
     load_metadata_config,
@@ -125,7 +126,7 @@ def _validated(body: dict):
     host = (body.get("host") or "").strip()
     user = (body.get("user") or "").strip()
     password = body.get("password") or ""
-    database = (body.get("database") or "ms3dm_metadata").strip()
+    database = (body.get("database") or DEFAULT_DATABASE_NAME).strip()
     try:
         port = int(body.get("port") or 1433)
     except (TypeError, ValueError):

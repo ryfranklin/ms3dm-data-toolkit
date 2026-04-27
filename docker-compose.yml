@@ -39,7 +39,7 @@ services:
       - MS3DM_METADATA_PORT=1433
       - MS3DM_METADATA_USER=sa
       - MS3DM_METADATA_PASSWORD=${SA_PASSWORD:-YourStrong@Passw0rd}
-      - MS3DM_METADATA_DATABASE=ms3dm_metadata
+      - MS3DM_METADATA_DATABASE=DataToolkit
     command: python app.py
     depends_on:
       sqlserver:

@@ -8,12 +8,14 @@ import { setupApi } from '../../api/client';
  * the user's local config file.
  */
 export default function SetupScreen({ onConfigured }) {
+  // Default DB name. KEEP IN SYNC with backend `services/app_config.py`
+  // `DEFAULT_DATABASE_NAME` — the field is editable, this is just the suggestion.
   const [form, setForm] = useState({
     host: '',
     port: 1433,
     user: 'sa',
     password: '',
-    database: 'ms3dm_metadata',
+    database: 'DataToolkit',
   });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -127,7 +129,9 @@ export default function SetupScreen({ onConfigured }) {
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Will be created on the server above if it doesn't already exist.
+              Defaults to <code className="bg-gray-100 px-1 rounded">DataToolkit</code>.
+              You can change this to any name; it'll be created on the server above
+              if it doesn't already exist.
             </p>
           </div>
 

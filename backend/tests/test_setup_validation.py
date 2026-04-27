@@ -18,12 +18,12 @@ def test_validated_returns_dict_for_well_formed_input():
         "port": 1433,
         "user": "svc",
         "password": "p;w",
-        "database": "ms3dm_metadata",
+        "database": "DataToolkit",
     })
     assert isinstance(cfg, dict)
     assert cfg["host"] == "sql.example"
     assert cfg["port"] == 1433
-    assert cfg["database"] == "ms3dm_metadata"
+    assert cfg["database"] == "DataToolkit"
 
 
 def test_validated_strips_whitespace():
@@ -42,7 +42,7 @@ def test_validated_strips_whitespace():
 def test_validated_defaults_port_and_database():
     cfg = _validated({"host": "h", "user": "u", "password": "p"})
     assert cfg["port"] == 1433
-    assert cfg["database"] == "ms3dm_metadata"
+    assert cfg["database"] == "DataToolkit"
 
 
 def test_validated_rejects_missing_host():

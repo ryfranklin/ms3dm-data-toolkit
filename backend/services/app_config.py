@@ -19,6 +19,12 @@ from pathlib import Path
 CONFIG_DIR_NAME = "ms3dm-toolkit"
 CONFIG_FILE_NAME = "config.json"
 
+# Single source of truth for the default metadata DB name. Imported by the
+# setup blueprint, MetadataStore, and the frontend SetupScreen via a copy.
+# Users can pick a different name during first-run setup and the app will
+# create whatever they choose.
+DEFAULT_DATABASE_NAME = "DataToolkit"
+
 REQUIRED_FIELDS = ("host", "user", "password", "database")
 
 
@@ -56,7 +62,7 @@ def _load_from_file() -> dict | None:
         "port": int(md.get("port", 1433)),
         "user": md["user"],
         "password": md["password"],
-        "database": md.get("database", "ms3dm_metadata"),
+        "database": md.get("database", DEFAULT_DATABASE_NAME),
     }
 
 
@@ -71,7 +77,7 @@ def _load_from_env() -> dict | None:
         "port": int(os.getenv("MS3DM_METADATA_PORT", "1433")),
         "user": user,
         "password": password,
-        "database": os.getenv("MS3DM_METADATA_DATABASE", "ms3dm_metadata"),
+        "database": os.getenv("MS3DM_METADATA_DATABASE", DEFAULT_DATABASE_NAME),
     }
 
 
@@ -91,7 +97,7 @@ def save_metadata_config(cfg: dict) -> Path:
             "port": int(cfg.get("port", 1433)),
             "user": cfg["user"],
             "password": cfg["password"],
-            "database": cfg.get("database", "ms3dm_metadata"),
+            "database": cfg.get("database", DEFAULT_DATABASE_NAME),
         }
     }
     p = config_path()
