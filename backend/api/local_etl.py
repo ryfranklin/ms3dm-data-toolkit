@@ -387,6 +387,117 @@ LINEAGE_COLUMNS = [
 LINEAGE_NAMES = [c["name"] for c in LINEAGE_COLUMNS]
 
 
+_INT_TYPES = {"INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT"}
+# Date placeholders that show up in financial/clinical exports — treat as NULL
+# rather than letting strptime blow up on them.
+_NULL_DATE_PLACEHOLDERS = {"00/00/00", "00/00/0000", "0000-00-00"}
+_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%Y/%m/%d")
+_DATETIME_FORMATS = (
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f",
+    "%m/%d/%Y %H:%M:%S", "%m/%d/%y %H:%M:%S",
+)
+
+
+def _coerce_value(value, sql_type: str):
+    """
+    Convert a CSV string (or already-typed value) to whatever Python type
+    pyodbc needs for the destination's SQL Server column type.
+
+    Integrity rules:
+      - empty/whitespace-only string => NULL
+      - leading/trailing whitespace stripped before parsing
+      - thousands-separator commas removed from numeric targets
+      - common date placeholders (`00/00/00`) => NULL
+      - any unparseable value RAISES; never silently zeroed or coerced
+    """
+    if value is None:
+        return None
+    # DuckDB-native types (Decimal, datetime, etc.) pass through unchanged.
+    if not isinstance(value, str):
+        return value
+
+    s = value.strip()
+    if s == "":
+        return None
+
+    from datetime import date, datetime
+    from decimal import Decimal, InvalidOperation
+
+    t = (sql_type or "").upper().strip()
+
+    if t in _INT_TYPES:
+        try:
+            return int(s.replace(",", ""))
+        except ValueError as exc:
+            raise ValueError(f"Cannot convert {value!r} to {sql_type}") from exc
+
+    if t.startswith("DECIMAL") or t.startswith("NUMERIC"):
+        try:
+            return Decimal(s.replace(",", ""))
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(f"Cannot convert {value!r} to {sql_type}") from exc
+
+    if t in ("FLOAT", "REAL"):
+        try:
+            return float(s.replace(",", ""))
+        except ValueError as exc:
+            raise ValueError(f"Cannot convert {value!r} to {sql_type}") from exc
+
+    if t == "BIT":
+        sl = s.lower()
+        if sl in ("1", "true", "yes", "y", "t"):
+            return True
+        if sl in ("0", "false", "no", "n", "f"):
+            return False
+        raise ValueError(f"Cannot convert {value!r} to BIT")
+
+    if t == "DATE":
+        if s in _NULL_DATE_PLACEHOLDERS:
+            return None
+        for fmt in _DATE_FORMATS:
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+        # ISO-formatted with no fmt above
+        try:
+            return date.fromisoformat(s)
+        except ValueError as exc:
+            raise ValueError(f"Cannot parse date {value!r}") from exc
+
+    if t in ("DATETIME2", "DATETIME", "SMALLDATETIME", "DATETIMEOFFSET"):
+        if s in _NULL_DATE_PLACEHOLDERS:
+            return None
+        for fmt in (*_DATETIME_FORMATS, *_DATE_FORMATS):
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError as exc:
+            raise ValueError(f"Cannot parse datetime {value!r}") from exc
+
+    # NVARCHAR / VARCHAR / CHAR / anything else — keep the trimmed string.
+    return s
+
+
+def _coerce_row(row: list, dest_columns: list[dict], col_names: list[str]) -> list:
+    """Apply _coerce_value across a row, raising with the column name on failure."""
+    out = []
+    for i, val in enumerate(row):
+        # Past the user columns are the appended lineage values (real Python
+        # types already, e.g. datetime + str), pass through.
+        if i >= len(dest_columns):
+            out.append(val)
+            continue
+        try:
+            out.append(_coerce_value(val, dest_columns[i]["type"]))
+        except ValueError as exc:
+            raise ValueError(f"Column '{col_names[i]}': {exc}") from exc
+    return out
+
+
 def _existing_lineage_columns(cursor, schema: str, table: str) -> list[str]:
     """Return the lineage column names that actually exist on the destination table."""
     cursor.execute(
@@ -539,7 +650,13 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
             _set_progress(run_id, **kw)
 
     progress(phase="reading", current=0, total=0)
-    file_data = read_file_rows(source_path)
+    # CSVs go through DuckDB as all-VARCHAR so we never abort mid-file on
+    # type-inference errors (e.g. `1,010.94` appearing past the sample
+    # window). Per-value coercion happens below via _coerce_row, where we
+    # know the actual destination column type and can strip commas, parse
+    # dates explicitly, etc.
+    is_csv = source_path.lower().endswith(".csv")
+    file_data = read_file_rows(source_path, all_varchar=is_csv)
     file_columns = file_data["columns"]
     file_rows = file_data["rows"]
     total_rows = len(file_rows)
@@ -591,9 +708,18 @@ def _execute_load(conn_cfg, source_path, mode, schema, table, columns, upsert_ke
             "_loaded_at": loaded_at,
         }
         extra_values = [lineage_value_for[name] for name in present_lineage]
-        rows_to_load = [row + extra_values for row in reordered]
-
         all_col_names = [c["name"] for c in columns] + present_lineage
+
+        # Coerce each user-column value to the destination type. Errors here
+        # surface as `Row N column 'X': ...` so the user can fix the source.
+        rows_to_load = []
+        for row_idx, row in enumerate(reordered):
+            try:
+                coerced = _coerce_row(row, columns, all_col_names)
+            except ValueError as exc:
+                raise ValueError(f"Row {row_idx + 1}: {exc}") from exc
+            rows_to_load.append(coerced + extra_values)
+
         quoted_cols = ", ".join(_quote_ident(c) for c in all_col_names)
         placeholders = ", ".join(["?"] * len(all_col_names))
 

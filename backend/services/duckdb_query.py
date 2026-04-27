@@ -165,12 +165,16 @@ def describe_file(filepath: str) -> list[dict]:
         conn.close()
 
 
-def read_file_rows(filepath: str, limit: int | None = None) -> dict:
+def read_file_rows(filepath: str, limit: int | None = None, all_varchar: bool = False) -> dict:
     """
     Read all (or up to `limit`) rows from a file via DuckDB.
     Returns {"columns": [...], "types": [...], "rows": [...], "row_count": int}.
-    Values are returned as native Python types (not serialized) so they can be
-    passed to pyodbc executemany.
+
+    `all_varchar=True` (CSV only) skips DuckDB's type inference entirely —
+    every column comes back as VARCHAR. Useful for the load path, where
+    inferring the wrong type from a sample (e.g. `1,010.94` showing up
+    after row 23,000) would abort the read mid-file. The caller then
+    coerces values to the destination column types at insert time.
     """
     ext = Path(filepath).suffix.lower()
     if ext not in _READER_MAP:
@@ -183,7 +187,13 @@ def read_file_rows(filepath: str, limit: int | None = None) -> dict:
                 conn.execute("INSTALL spatial; LOAD spatial;")
             except Exception:
                 pass
-        reader = _reader_sql(filepath, ext)
+
+        if ext == ".csv" and all_varchar:
+            safe_path = filepath.replace("'", "''")
+            reader = f"read_csv_auto('{safe_path}', all_varchar=true)"
+        else:
+            reader = _reader_sql(filepath, ext)
+
         sql = f"SELECT * FROM {reader}"
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
