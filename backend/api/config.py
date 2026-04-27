@@ -12,22 +12,34 @@ def _store():
     return current_app.config['METADATA_STORE']
 
 
+def _safe_connection(conn):
+    """
+    Return a copy of the connection dict with the password stripped.
+    Adds `has_password` so the UI can tell whether one is set without exposing it.
+    """
+    if not conn:
+        return conn
+    safe = {k: v for k, v in conn.items() if k != 'password'}
+    safe['has_password'] = bool(conn.get('password'))
+    return safe
+
+
 @config_bp.route('/', methods=['GET'])
 def get_connections():
-    """Get all configured connections"""
+    """Get all configured connections (passwords stripped from response)."""
     try:
         connections = _store().get_all_connections()
-        return jsonify({'connections': connections}), 200
+        return jsonify({'connections': [_safe_connection(c) for c in connections]}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @config_bp.route('/<connection_id>', methods=['GET'])
 def get_connection(connection_id):
-    """Get a specific connection by ID"""
+    """Get a specific connection by ID (password stripped from response)."""
     try:
         connection = _store().get_connection(connection_id)
         if connection:
-            return jsonify(connection), 200
+            return jsonify(_safe_connection(connection)), 200
         return jsonify({'error': 'Connection not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500

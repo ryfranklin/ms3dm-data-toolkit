@@ -220,6 +220,60 @@ export const dbtApi = {
   cleanup: (connectionId) => apiClient.delete(`/api/dbt/${connectionId}/artifacts`),
 };
 
+// Local ETL API
+export const localEtlApi = {
+  getSettings: () => apiClient.get('/api/local-etl/settings'),
+  updateSettings: (storagePath) => apiClient.put('/api/local-etl/settings', { storage_path: storagePath }),
+  browse: (path) => apiClient.get('/api/local-etl/browse', { params: { path } }),
+  getFiles: () => apiClient.get('/api/local-etl/files'),
+  upload: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.post('/api/local-etl/upload', formData, {
+      headers: { 'Content-Type': undefined },
+      timeout: 120000,
+    });
+  },
+  deleteFile: (filename) => apiClient.delete(`/api/local-etl/files/${encodeURIComponent(filename)}`),
+  getSchema: (filename) => apiClient.get(`/api/local-etl/schema/${encodeURIComponent(filename)}`),
+  query: (sql, limit) => apiClient.post('/api/local-etl/query', { sql, limit }),
+  exportQuery: async (sql) => {
+    const response = await axios.create({
+      baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+      timeout: 120000,
+      responseType: 'blob',
+    }).post('/api/local-etl/query/export', { sql }, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return response.data;
+  },
+
+  // ETL pipeline endpoints (file → SQL Server)
+  listConnections: () => apiClient.get('/api/local-etl/connections'),
+  listDestinationTables: (connId) => apiClient.get(`/api/local-etl/connections/${connId}/tables`),
+  inspectTable: (connId, schema, table) =>
+    apiClient.post(`/api/local-etl/connections/${connId}/inspect-table`, { schema, table }),
+  getSourceSchema: (filename) =>
+    apiClient.get(`/api/local-etl/source-schema/${encodeURIComponent(filename)}`),
+  runPipeline: (payload) =>
+    apiClient.post('/api/local-etl/pipelines/run', payload, { timeout: 300000 }),
+  runSavedPipeline: (id, payload = {}) =>
+    apiClient.post(`/api/local-etl/pipelines/${id}/run`, payload, { timeout: 300000 }),
+  listPipelines: () => apiClient.get('/api/local-etl/pipelines'),
+  createPipeline: (payload) => apiClient.post('/api/local-etl/pipelines', payload),
+  updatePipeline: (id, payload) => apiClient.put(`/api/local-etl/pipelines/${id}`, payload),
+  deletePipeline: (id) => apiClient.delete(`/api/local-etl/pipelines/${id}`),
+  listPipelineRuns: (params = {}) =>
+    apiClient.get('/api/local-etl/pipeline-runs', { params }),
+};
+
+// Setup API (first-run wizard for the desktop bundle)
+export const setupApi = {
+  getStatus: () => apiClient.get('/api/setup/status'),
+  testConnection: (payload) => apiClient.post('/api/setup/test', payload, { timeout: 15000 }),
+  configure: (payload) => apiClient.post('/api/setup/configure', payload, { timeout: 30000 }),
+};
+
 // Health check
 export const healthCheck = () => apiClient.get('/health');
 

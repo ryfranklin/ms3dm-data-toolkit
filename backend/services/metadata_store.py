@@ -15,12 +15,20 @@ from typing import Dict, List, Optional
 class MetadataStore:
     """SQL Server-backed metadata store for all application data."""
 
-    def __init__(self):
-        self.host = os.getenv('MS3DM_METADATA_HOST', 'sqlserver')
-        self.port = int(os.getenv('MS3DM_METADATA_PORT', '1433'))
-        self.user = os.getenv('MS3DM_METADATA_USER', 'sa')
-        self.password = os.getenv('MS3DM_METADATA_PASSWORD', '')
-        self.database = os.getenv('MS3DM_METADATA_DATABASE', 'ms3dm_metadata')
+    def __init__(self, config: Optional[Dict] = None):
+        """
+        Args:
+            config: Optional dict with keys host, port, user, password, database.
+                   When None, falls back to MS3DM_METADATA_* env vars (legacy
+                   dev/Docker workflow). The desktop bundle always passes config
+                   loaded from the user's config.json.
+        """
+        cfg = config or {}
+        self.host = cfg.get('host') or os.getenv('MS3DM_METADATA_HOST', 'sqlserver')
+        self.port = int(cfg.get('port') or os.getenv('MS3DM_METADATA_PORT', '1433'))
+        self.user = cfg.get('user') or os.getenv('MS3DM_METADATA_USER', 'sa')
+        self.password = cfg.get('password') or os.getenv('MS3DM_METADATA_PASSWORD', '')
+        self.database = cfg.get('database') or os.getenv('MS3DM_METADATA_DATABASE', 'ms3dm_metadata')
         self._local = threading.local()
 
     # ------------------------------------------------------------------ #
@@ -209,6 +217,24 @@ class MetadataStore:
             )
         """)
 
+        cursor.execute("""
+            IF OBJECT_ID('etl_pipeline_runs', 'U') IS NULL
+            CREATE TABLE etl_pipeline_runs (
+                run_id          NVARCHAR(100)   PRIMARY KEY,
+                pipeline_id     NVARCHAR(100)   NULL,
+                pipeline_name   NVARCHAR(255)   NULL,
+                source_file     NVARCHAR(255)   NULL,
+                connection_id   NVARCHAR(100)   NULL,
+                destination     NVARCHAR(500)   NULL,
+                mode            NVARCHAR(50)    NULL,
+                status          NVARCHAR(20)    NULL,
+                rows_loaded     INT             NULL,
+                duration_ms     FLOAT           NULL,
+                started_at      DATETIME2       DEFAULT GETUTCDATE(),
+                error_message   NVARCHAR(MAX)   NULL
+            )
+        """)
+
         conn.commit()
         cursor.close()
 
@@ -280,6 +306,13 @@ class MetadataStore:
         if not existing:
             raise ValueError(f"Connection with ID {connection_id} not found")
 
+        # Preserve the existing password unless the update payload supplies a
+        # new non-empty one. Important: the GET endpoints strip passwords from
+        # responses, so edit forms will submit empty/missing — without this
+        # guard, every edit would wipe the saved credential.
+        new_password = data.get('password')
+        password = new_password if new_password else existing.get('password')
+
         now = datetime.utcnow().isoformat()
         self._execute(
             """UPDATE connections SET
@@ -294,7 +327,7 @@ class MetadataStore:
                 data.get('database', existing['database']),
                 data.get('auth_type', existing['auth_type']),
                 data.get('username', existing.get('username')),
-                data.get('password', existing.get('password')),
+                password,
                 data.get('description', existing.get('description')),
                 1 if data.get('active', existing.get('active', True)) else 0,
                 1 if data.get('is_sample', existing.get('is_sample', False)) else 0,
@@ -760,6 +793,49 @@ class MetadataStore:
             (key, value, key, value),
             commit=True,
         )
+
+    # ================================================================== #
+    #  ETL PIPELINE RUNS  (execution history)
+    # ================================================================== #
+
+    def record_pipeline_run(self, run: Dict) -> str:
+        """Insert a row into etl_pipeline_runs and return its run_id."""
+        run_id = run.get('run_id', str(uuid.uuid4()))
+        self._execute(
+            """INSERT INTO etl_pipeline_runs
+               (run_id, pipeline_id, pipeline_name, source_file, connection_id,
+                destination, mode, status, rows_loaded, duration_ms,
+                started_at, error_message)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                run_id,
+                run.get('pipeline_id'),
+                run.get('pipeline_name'),
+                run.get('source_file'),
+                run.get('connection_id'),
+                run.get('destination'),
+                run.get('mode'),
+                run.get('status'),
+                run.get('rows_loaded'),
+                run.get('duration_ms'),
+                run.get('started_at') or datetime.utcnow().isoformat(),
+                run.get('error_message'),
+            ),
+            commit=True,
+        )
+        return run_id
+
+    def get_pipeline_runs(self, limit: int = 50, pipeline_id: Optional[str] = None) -> List[Dict]:
+        """Return recent pipeline runs, newest first. Optionally filter by pipeline_id."""
+        limit = max(1, min(int(limit), 500))
+        if pipeline_id:
+            sql = (
+                f"SELECT TOP {limit} * FROM etl_pipeline_runs "
+                "WHERE pipeline_id = ? ORDER BY started_at DESC"
+            )
+            return self._fetchall_dict(sql, (pipeline_id,))
+        sql = f"SELECT TOP {limit} * FROM etl_pipeline_runs ORDER BY started_at DESC"
+        return self._fetchall_dict(sql)
 
     def get_last_cleanup(self) -> Optional[datetime]:
         val = self.get_setting('last_cleanup')

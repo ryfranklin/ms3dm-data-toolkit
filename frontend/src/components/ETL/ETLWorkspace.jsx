@@ -2,15 +2,17 @@ import React, { useState } from 'react';
 import QualityDashboard from '../QualityDashboard/QualityDashboard';
 import PipelineBuilder from '../QualityBuilder/PipelineBuilder';
 import PipelineScheduler from '../Scheduler/PipelineScheduler';
+import LocalETLPanel from '../LocalETL/LocalETLPanel';
 
 const tabs = [
+  { key: 'local-etl', label: 'Local ETL' },
   { key: 'quality', label: 'Data Quality' },
   { key: 'pipeline', label: 'Pipeline Builder' },
   { key: 'scheduler', label: 'Scheduler' },
 ];
 
 export default function ETLWorkspace() {
-  const [activeTab, setActiveTab] = useState('quality');
+  const [activeTab, setActiveTab] = useState('local-etl');
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
@@ -46,6 +48,10 @@ export default function ETLWorkspace() {
 
       <div className={`flex-1 ${activeTab === 'scheduler' ? '' : 'hidden'}`}>
         <PipelineScheduler />
+      </div>
+
+      <div className={`flex-1 ${activeTab === 'local-etl' ? '' : 'hidden'}`}>
+        <LocalETLPanel />
       </div>
     </div>
   );

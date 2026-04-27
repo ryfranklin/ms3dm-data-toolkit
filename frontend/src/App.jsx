@@ -1,12 +1,56 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import ConfigManager from './components/ConfigManager/ConfigManager';
 import ETLWorkspace from './components/ETL/ETLWorkspace';
 import Documentation from './components/Documentation/Documentation';
 import DataCatalog from './components/DataCatalog/DataCatalog';
 import StorageWarning from './components/StorageWarning/StorageWarning';
+import SetupScreen from './components/Setup/SetupScreen';
+import { setupApi } from './api/client';
 
 function App() {
+  // null = unknown (initial fetch in flight); true/false = needs_setup state.
+  const [needsSetup, setNeedsSetup] = useState(null);
+  const [setupError, setSetupError] = useState(null);
+
+  const checkSetup = useCallback(async () => {
+    try {
+      const res = await setupApi.getStatus();
+      setNeedsSetup(!!res.data?.needs_setup);
+      setSetupError(null);
+    } catch (err) {
+      setSetupError(err.message);
+      // Be conservative — if status check itself fails, render setup screen
+      // so the user can at least try to fix the connection.
+      setNeedsSetup(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkSetup();
+  }, [checkSetup]);
+
+  if (needsSetup === null) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-sm text-gray-500">Loading…</p>
+      </div>
+    );
+  }
+
+  if (needsSetup) {
+    return (
+      <>
+        {setupError && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-2">
+            {setupError}
+          </div>
+        )}
+        <SetupScreen onConfigured={checkSetup} />
+      </>
+    );
+  }
+
   return (
     <Router>
       <div className="min-h-screen bg-gray-50">
@@ -55,7 +99,7 @@ function App() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
             <StorageWarning />
           </div>
-          
+
           <Routes>
             <Route path="/" element={<div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8"><ConfigManager /></div>} />
             <Route path="/etl" element={<ETLWorkspace />} />

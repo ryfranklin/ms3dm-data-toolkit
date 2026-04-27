@@ -26,6 +26,7 @@ services:
     volumes:
       - ./backend:/app
       - dags_volume:/app/dags
+      - ./local_storage:/app/local_storage
     environment:
       - FLASK_ENV=development
       - FLASK_DEBUG=1

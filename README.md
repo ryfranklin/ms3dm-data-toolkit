@@ -28,7 +28,46 @@ A lightweight Python data platform for local data analysis with SQL Server. Feat
 - TailwindCSS responsive design
 - Interactive visualizations
 
-## Quick Start with Docker (Recommended)
+## Install (end users — Windows desktop)
+
+Single-folder install, no Docker required.
+
+### Prerequisites
+- **Microsoft ODBC Driver 18 for SQL Server** — [download from Microsoft](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server). One-time install. Same driver Excel and Power BI use, so it's normally pre-approved on managed laptops.
+- A SQL Server you can connect to (your existing BI server is fine — the app will create its own metadata database there).
+
+### Install
+
+1. Download the latest `ms3dm-toolkit-windows-x64.zip` from the [Releases page](../../releases).
+2. Extract the zip to any folder you have write access to (e.g. `C:\Tools\ms3dm-toolkit`).
+3. Double-click `ms3dm-toolkit.exe`.
+4. Your browser opens to the first-run setup screen — enter your SQL Server host, port, username, and password. The app creates its `ms3dm_metadata` database automatically.
+
+The app stores its config (including the metadata SQL credentials) at `%APPDATA%\ms3dm-toolkit\config.json`. Delete that file to re-trigger the setup wizard.
+
+---
+
+## Build a Windows release (developers)
+
+```powershell
+# On a Windows machine with Python 3.11+ and Node 18+
+.\build.ps1
+# Output: dist\ms3dm-toolkit-windows-x64.zip
+```
+
+Or push a tag to let GitHub Actions build it for you:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+# .github/workflows/release.yml builds on windows-latest and attaches the
+# zip to a draft GitHub Release. No Windows machine needed.
+```
+
+To smoke-test the PyInstaller spec on macOS without a Windows VM, run `./build.sh` — produces a non-Windows binary that exercises the same code path.
+
+---
+
+## Quick Start with Docker (developers)
 
 ### Prerequisites
 - Docker and Docker Compose

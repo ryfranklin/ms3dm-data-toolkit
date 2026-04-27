@@ -1,23 +1,24 @@
-connections:
-- id: local_adventureworks
-  name: Local AdventureWorks (Docker)
-  server: sqlserver
-  port: 1433
-  database: AdventureWorksLT2022
-  auth_type: sql_auth
-  username: sa
-  password: YourStrong@Passw0rd
-  description: Sample database for testing (containerized)
-  active: true
-  is_sample: true
+# DEPRECATED — no longer loaded at runtime.
+#
+# Connections are now managed via the UI (Targets tab) and persisted in the
+# `connections` table of the `ms3dm_metadata` SQL Server database. Add or
+# edit connections through the app instead of editing this file.
+#
+# This file is kept only as documentation of the connection schema. Never
+# commit real credentials to it.
 
-# Example: Windows Authentication Connection
-# - id: prod_windows
-#   name: Production Server (Windows Auth)
-#   server: PROD-SQL-01
-#   port: 1433
-#   database: ProductionDB
-#   auth_type: windows
-#   description: Production database using Windows Authentication
-#   active: true
-#   is_sample: false
+connections: []
+
+# Example shape for reference only — do NOT put real passwords here:
+#
+# connections:
+#   - id: my_connection
+#     name: Display Name
+#     server: hostname-or-docker-service
+#     port: 1433
+#     database: MyDatabase
+#     auth_type: sql_auth         # or "windows"
+#     username: <your-user>       # required for sql_auth
+#     password: <your-password>   # required for sql_auth
+#     description: optional
+#     active: true

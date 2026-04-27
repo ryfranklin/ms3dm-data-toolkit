@@ -51,6 +51,16 @@ dagu/logs/
 backend/dbt_project/targets/
 !backend/dbt_project/targets/.gitkeep
 
+# Local ETL storage (user data stays local)
+local_storage/
+!local_storage/.gitkeep
+
+# Quality / expectation result files (may contain source data, error
+# messages, or connection IDs — keep out of git)
+results/
+backend/expectations_results/
+backend/last_cleanup.json
+
 # Logs
 backend/logs/*.log
 !backend/logs/.gitkeep
