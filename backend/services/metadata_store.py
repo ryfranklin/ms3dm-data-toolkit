@@ -37,12 +37,17 @@ class MetadataStore:
 
     def _conn_str(self, database: str = None) -> str:
         db = database or self.database
+        # Encrypt=Optional + TrustServerCertificate=yes lets internal SQL
+        # Servers with self-signed certs connect under ODBC Driver 18's
+        # stricter `Encrypt=Mandatory` default. See db_connector.py for the
+        # same fix on user-supplied connections.
         return (
             "DRIVER={ODBC Driver 18 for SQL Server};"
             f"SERVER={self.host},{self.port};"
             f"DATABASE={db};"
             f"UID={self.user};"
             f"PWD={self.password};"
+            "Encrypt=Optional;"
             "TrustServerCertificate=yes;"
         )
 

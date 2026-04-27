@@ -29,6 +29,13 @@ class DBConnector:
         # Determine ODBC driver
         driver = '{ODBC Driver 18 for SQL Server}'
         
+        # ODBC Driver 18 changed `Encrypt` default to `Mandatory`. In that
+        # mode self-signed/internal-CA certs fail validation even with
+        # `TrustServerCertificate=yes`. Setting `Encrypt=Optional` makes
+        # encryption a negotiated preference, which lets internal SQL Servers
+        # (the common case for this toolkit) connect cleanly.
+        encryption = "Encrypt=Optional;TrustServerCertificate=yes;"
+
         # Build base connection string
         if auth_type == 'windows':
             # Windows Authentication
@@ -37,22 +44,22 @@ class DBConnector:
                 f"SERVER={server};"
                 f"DATABASE={database};"
                 f"Trusted_Connection=yes;"
-                f"TrustServerCertificate=yes;"
+                f"{encryption}"
             )
         else:
             # SQL Server Authentication
             username = self.config.get('username', 'sa')
             password = self.config.get('password', '')
-            
+
             conn_str = (
                 f"DRIVER={driver};"
                 f"SERVER={server},{port};"
                 f"DATABASE={database};"
                 f"UID={username};"
                 f"PWD={password};"
-                f"TrustServerCertificate=yes;"
+                f"{encryption}"
             )
-        
+
         return conn_str
     
     def connect(self) -> pyodbc.Connection:
