@@ -41,12 +41,16 @@ class MetadataStore:
         # Servers with self-signed certs connect under ODBC Driver 18's
         # stricter `Encrypt=Mandatory` default. See db_connector.py for the
         # same fix on user-supplied connections.
+        # Wrap UID/PWD in braces so passwords containing ;, =, {, or quotes
+        # (common in service-account creds) survive ODBC parsing.
+        uid = "{" + str(self.user).replace("}", "}}") + "}"
+        pwd = "{" + str(self.password).replace("}", "}}") + "}"
         return (
             "DRIVER={ODBC Driver 18 for SQL Server};"
             f"SERVER={self.host},{self.port};"
             f"DATABASE={db};"
-            f"UID={self.user};"
-            f"PWD={self.password};"
+            f"UID={uid};"
+            f"PWD={pwd};"
             "Encrypt=Optional;"
             "TrustServerCertificate=yes;"
         )

@@ -6,6 +6,19 @@ import pyodbc
 from typing import Dict, List, Optional, Tuple, Any
 import os
 
+
+def _brace(value: str) -> str:
+    """
+    Wrap an ODBC connection-string value in `{...}` and escape any embedded
+    `}` as `}}`. Required when the value contains `;`, `=`, `{`, quotes, or
+    other ODBC delimiters — common in machine-generated service-account
+    passwords. Safe to apply to any string.
+    """
+    if value is None:
+        return ""
+    return "{" + str(value).replace("}", "}}") + "}"
+
+
 class DBConnector:
     """SQL Server database connector with support for multiple authentication types"""
     
@@ -55,8 +68,8 @@ class DBConnector:
                 f"DRIVER={driver};"
                 f"SERVER={server},{port};"
                 f"DATABASE={database};"
-                f"UID={username};"
-                f"PWD={password};"
+                f"UID={_brace(username)};"
+                f"PWD={_brace(password)};"
                 f"{encryption}"
             )
 
