@@ -1,4 +1,4 @@
-# MS3DM Toolkit
+# MS3DM Workbench
 
 A lightweight Python data platform for local data analysis with SQL Server. Features include connection management, data quality checks, and visual data flow documentation.
 

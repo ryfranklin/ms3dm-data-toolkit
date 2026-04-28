@@ -1,6 +1,6 @@
-# MS3DM Toolkit - Backend
+# MS3DM Workbench - Backend
 
-Flask-based REST API for the MS3DM Toolkit.
+Flask-based REST API for the MS3DM Workbench.
 
 ## Tech Stack
 

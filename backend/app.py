@@ -1,5 +1,5 @@
 """
-MS3DM Toolkit - Flask Backend
+MS3DM Workbench - Flask Backend
 Main application entry point.
 
 In the bundled desktop build this single Flask process serves both the
@@ -106,7 +106,7 @@ def create_app():
     def health_check():
         return jsonify({
             'status': 'healthy',
-            'service': 'ms3dm-toolkit',
+            'service': 'ms3dm-workbench',
             'version': '1.0.0',
             'configured': app.config.get('METADATA_STORE') is not None,
         }), 200
@@ -130,7 +130,7 @@ def create_app():
         @app.route('/', methods=['GET'])
         def root():
             return jsonify({
-                'message': 'MS3DM Toolkit API',
+                'message': 'MS3DM Workbench API',
                 'version': '1.0.0',
                 'endpoints': {
                     'health': '/health',

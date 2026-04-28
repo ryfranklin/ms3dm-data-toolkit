@@ -107,14 +107,14 @@ jobs:
       - name: Upload zip as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ms3dm-toolkit-windows-x64
-          path: dist/ms3dm-toolkit-windows-x64.zip
+          name: ms3dm-workbench-windows-x64
+          path: dist/ms3dm-workbench-windows-x64.zip
           retention-days: 30
 
       - name: Attach to GitHub Release (tag pushes only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ms3dm-toolkit-windows-x64.zip
+          files: dist/ms3dm-workbench-windows-x64.zip
           generate_release_notes: true
           draft: false

@@ -1,6 +1,6 @@
-# MS3DM Toolkit — Windows desktop build
+# MS3DM Workbench — Windows desktop build
 #
-# Produces a zip at `dist/ms3dm-toolkit-windows-x64.zip` ready to ship.
+# Produces a zip at `dist/ms3dm-workbench-windows-x64.zip` ready to ship.
 #
 # Requirements on the build machine:
 #   - Python 3.11+ on PATH
@@ -61,25 +61,25 @@ try {
     Write-Host "==> Running PyInstaller..." -ForegroundColor Cyan
     if (Test-Path build) { Remove-Item build -Recurse -Force }
     if (Test-Path dist)  { Remove-Item dist  -Recurse -Force }
-    pyinstaller ms3dm_toolkit.spec --clean --noconfirm
+    pyinstaller ms3dm_workbench.spec --clean --noconfirm
 } finally {
     if (Test-Path Function:\deactivate) { deactivate }
     Pop-Location
 }
 
-if (-not (Test-Path backend\dist\ms3dm-toolkit\ms3dm-toolkit.exe)) {
-    throw "PyInstaller didn't produce ms3dm-toolkit.exe — check the output above"
+if (-not (Test-Path backend\dist\ms3dm-workbench\ms3dm-workbench.exe)) {
+    throw "PyInstaller didn't produce ms3dm-workbench.exe — check the output above"
 }
 
 # ----- Zip the bundle -----
 Write-Host "==> Packaging zip..." -ForegroundColor Cyan
 $OutDir = Join-Path $RepoRoot 'dist'
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
-$ZipPath = Join-Path $OutDir 'ms3dm-toolkit-windows-x64.zip'
+$ZipPath = Join-Path $OutDir 'ms3dm-workbench-windows-x64.zip'
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 
 Compress-Archive `
-    -Path (Join-Path $RepoRoot 'backend\dist\ms3dm-toolkit\*') `
+    -Path (Join-Path $RepoRoot 'backend\dist\ms3dm-workbench\*') `
     -DestinationPath $ZipPath
 
 $ZipMB = [Math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
@@ -90,4 +90,4 @@ Write-Host ""
 Write-Host "End-user install:"
 Write-Host "  1. Install Microsoft ODBC Driver 18 for SQL Server"
 Write-Host "  2. Extract the zip anywhere"
-Write-Host "  3. Run ms3dm-toolkit.exe — browser opens automatically"
+Write-Host "  3. Run ms3dm-workbench.exe — browser opens automatically"

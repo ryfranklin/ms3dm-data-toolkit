@@ -62,7 +62,7 @@ export default function SetupScreen({ onConfigured }) {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-8">
       <div className="bg-white rounded-lg shadow w-full max-w-xl">
         <div className="px-6 py-5 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">Welcome to MS3DM Toolkit</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Welcome to MS3DM Workbench</h1>
           <p className="text-sm text-gray-500 mt-1">
             First-run setup. Enter the SQL Server where the app should store its metadata
             (connections, pipelines, run history). The database will be created automatically

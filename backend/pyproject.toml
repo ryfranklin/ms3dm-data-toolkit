@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ms3dm-toolkit-backend"
+name = "ms3dm-workbench-backend"
 version = "1.0.0"
-description = "MS3DM Toolkit Backend"
+description = "MS3DM Workbench Backend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

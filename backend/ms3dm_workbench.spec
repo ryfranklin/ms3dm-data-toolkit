@@ -2,12 +2,12 @@
 """
 PyInstaller spec for the bundled desktop build.
 
-Produces a folder distribution at `backend/dist/ms3dm-toolkit/` containing
-`ms3dm-toolkit.exe` plus all dependencies. The built React app is bundled
+Produces a folder distribution at `backend/dist/ms3dm-workbench/` containing
+`ms3dm-workbench.exe` plus all dependencies. The built React app is bundled
 in `static/` and Flask serves it on the same port as the API.
 
 Build:
-    pyinstaller ms3dm_toolkit.spec --clean --noconfirm
+    pyinstaller ms3dm_workbench.spec --clean --noconfirm
 """
 from pathlib import Path
 
@@ -90,7 +90,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='ms3dm-toolkit',
+    name='ms3dm-workbench',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -112,5 +112,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='ms3dm-toolkit',
+    name='ms3dm-workbench',
 )

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MS3DM Toolkit — local dev build (macOS / Linux)
+# MS3DM Workbench — local dev build (macOS / Linux)
 #
 # Useful for verifying the PyInstaller spec works before pushing to CI.
 # Produces a non-Windows binary that won't run on user machines — use
@@ -44,21 +44,21 @@ fi
 
 echo "==> Running PyInstaller..."
 rm -rf build dist
-pyinstaller ms3dm_toolkit.spec --clean --noconfirm
+pyinstaller ms3dm_workbench.spec --clean --noconfirm
 deactivate
 popd >/dev/null
 
-[[ -d backend/dist/ms3dm-toolkit ]] || {
-    echo "PyInstaller didn't produce backend/dist/ms3dm-toolkit/" >&2
+[[ -d backend/dist/ms3dm-workbench ]] || {
+    echo "PyInstaller didn't produce backend/dist/ms3dm-workbench/" >&2
     exit 1
 }
 
 echo "==> Packaging zip..."
 mkdir -p dist
-ZIP_NAME="ms3dm-toolkit-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).zip"
+ZIP_NAME="ms3dm-workbench-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).zip"
 ZIP_PATH="$REPO_ROOT/dist/$ZIP_NAME"
 rm -f "$ZIP_PATH"
-(cd backend/dist/ms3dm-toolkit && zip -rq "$ZIP_PATH" .)
+(cd backend/dist/ms3dm-workbench && zip -rq "$ZIP_PATH" .)
 
 ZIP_MB=$(du -m "$ZIP_PATH" | cut -f1)
 echo

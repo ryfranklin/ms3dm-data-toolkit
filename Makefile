@@ -1,7 +1,7 @@
 .PHONY: help install dev up down logs clean backend-lint frontend-lint lint backend-format format typecheck test test-docker test-frontend
 
 help:
-	@echo "MS3DM Toolkit - Available Commands"
+	@echo "MS3DM Workbench - Available Commands"
 	@echo ""
 	@echo "Docker Commands:"
 	@echo "  make up         - Start all services with Docker Compose"
